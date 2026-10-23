@@ -18,4 +18,19 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "swf2c"
+path = "src/main.rs"
+
+# Exact pins: asset output must not change under a semver-compatible update.
 [dependencies]
+swf = { version = "=0.3.0", default-features = false, features = ["flate2"] }
+lyon = "=1.0.19"
+jpeg-decoder = { version = "=0.3.2", default-features = false }
+png = "=0.18.1"
+flate2 = "=1.1.9"
+gif = "=0.14.2"
+symphonia = { version = "=0.5.5", default-features = false, features = ["mp3"] }
