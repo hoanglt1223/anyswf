@@ -1,0 +1,21 @@
+[workspace]
+members = ["."]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.97"
+license = "MIT"
+authors = ["Henry Nguyen"]
+
+[package]
+name = "swf2c"
+version = "0.1.0"
+description = "Compiles SWF (AS1/AS2) movies ahead of time into C and runtime assets"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]

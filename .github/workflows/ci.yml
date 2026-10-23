@@ -1,0 +1,74 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  swf2c:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: swf2c
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # rust-toolchain.toml pins the exact toolchain; rustup installs it on first use.
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+
+  pc-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install SDL3 build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build pkg-config xvfb \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev \
+            libxss-dev libxtst-dev libxkbcommon-dev libgl1-mesa-dev libegl1-mesa-dev \
+            libasound2-dev libpulse-dev libdbus-1-dev libudev-dev \
+            libwayland-dev wayland-protocols libdecor-0-dev
+      - run: cmake -S . -B out/linux -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build out/linux
+      - run: ctest --test-dir out/linux --output-on-failure
+      - name: Hello smoke test (headless, Mesa software GL)
+        run: xvfb-run -a out/linux/apps/hello/hello --smoke
+
+  pc-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: cmake -S . -B out/msvc -G "Visual Studio 17 2022" -A x64
+      - run: cmake --build out/msvc --config Release --parallel
+      - run: ctest --test-dir out/msvc -C Release --output-on-failure
+      # No smoke run: hosted Windows runners have no OpenGL 2.1 driver.
+
+  psp:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The pspdev image is Alpine (musl), where JavaScript actions cannot run,
+      # so the container is driven from the host through the same script as local builds.
+      - run: bash scripts/psp-build.sh Release
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hello-eboot
+          path: out/psp/apps/hello/EBOOT.PBP
+          if-no-files-found: error
+
+  corpus:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: bash tests/fetch-mtasc.sh
+      - run: bash tests/build-corpus.sh out/corpus
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-corpus
+          path: out/corpus
+          if-no-files-found: error
