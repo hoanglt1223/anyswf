@@ -39,6 +39,22 @@ impl Image {
         ]
     }
 
+    /// Grows the image to w x h by repeating its last column and row.
+    pub fn pad_replicate(&self, w: u32, h: u32) -> Image {
+        let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h {
+            let sy = y.min(self.height - 1);
+            for x in 0..w {
+                rgba.extend_from_slice(&self.pixel(x.min(self.width - 1), sy));
+            }
+        }
+        Image {
+            width: w,
+            height: h,
+            rgba,
+        }
+    }
+
     pub fn crop(&self, x0: u32, y0: u32, w: u32, h: u32) -> Image {
         let mut rgba = Vec::with_capacity((w * h * 4) as usize);
         for y in y0..y0 + h {
@@ -556,41 +572,37 @@ pub fn unswizzle(data: &[u8], width_bytes: usize, height: usize) -> Vec<u8> {
 /// power-of-two size (needed for repeating fills); otherwise the image is padded.
 /// `force` picks a format instead of the automatic choice.
 pub fn encode(img: &Image, stretch: bool, wrap: Wrap, force: Option<TexFormat>) -> Texture {
-    let (pw, ph) = (next_pow2(img.width), next_pow2(img.height));
     let src = if stretch {
-        img.resize(pw, ph)
+        img.resize(next_pow2(img.width), next_pow2(img.height))
     } else {
         img.clone()
     };
     let (used_w, used_h) = (src.width, src.height);
     let format = force.unwrap_or_else(|| auto_format(&src));
+    let bpp_bytes = (format.bits() / 8).max(1) as usize;
+    // The GE wants rows of at least 16 bytes; padding replicates the edge texels so
+    // filtering at the image border does not pull in padding.
+    let pw = next_pow2(used_w).max(16 / bpp_bytes as u32);
+    let ph = next_pow2(used_h);
+    let padded = src.pad_replicate(pw, ph);
     let mut clut = Vec::new();
-    let (texels, bpp_bytes): (Vec<u8>, usize) = if format == TexFormat::Clut8 {
-        let (pal, idx) = quantize(&src);
+    let texels: Vec<u8> = if format == TexFormat::Clut8 {
+        let (pal, idx) = quantize(&padded);
         let n = pal.len().div_ceil(16).max(1) * 16;
         for i in 0..n {
             clut.extend_from_slice(&pal.get(i).copied().unwrap_or([0; 4]));
         }
-        let mut t = vec![0u8; (pw * ph) as usize];
-        for y in 0..used_h as usize {
-            let row = &idx[y * used_w as usize..(y + 1) * used_w as usize];
-            t[y * pw as usize..y * pw as usize + used_w as usize].copy_from_slice(row);
-        }
-        (t, 1)
+        idx
     } else {
-        let bytes = (format.bits() / 8) as usize;
-        let mut t = vec![0u8; (pw * ph) as usize * bytes];
-        for y in 0..used_h {
-            for x in 0..used_w {
-                let v = pack(format, src.pixel(x, y));
-                let o = ((y * pw + x) as usize) * bytes;
-                t[o..o + bytes].copy_from_slice(&v.to_le_bytes()[..bytes]);
-            }
+        let mut t = Vec::with_capacity((pw * ph) as usize * bpp_bytes);
+        for p in padded.rgba.chunks_exact(4) {
+            let v = pack(format, [p[0], p[1], p[2], p[3]]);
+            t.extend_from_slice(&v.to_le_bytes()[..bpp_bytes]);
         }
-        (t, bytes)
+        t
     };
     let width_bytes = pw as usize * bpp_bytes;
-    let swizzled = width_bytes >= 16 && ph >= 8;
+    let swizzled = ph >= 8;
     let data = if swizzled {
         swizzle(&texels, width_bytes, ph as usize)
     } else {

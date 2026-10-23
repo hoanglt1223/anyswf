@@ -1,0 +1,142 @@
+# Static-frame render tests. `swf` is relative to the repository root; `gen:NAME` is a
+# movie written by `cargo run --example gen_test_swfs`. `phase` records which pipeline
+# stage the case validates. `known_failure` cases are run and reported (XFAIL/XPASS)
+# but do not fail the suite. References in ref/ come from Ruffle (make_refs.py).
+
+[[case]]
+name = "g01_solid_shapes"
+swf = "gen:g01_solid_shapes"
+phase = 2
+
+[[case]]
+name = "g02_curves_holes"
+swf = "gen:g02_curves_holes"
+phase = 2
+
+[[case]]
+name = "g03_strokes"
+swf = "gen:g03_strokes"
+phase = 2
+
+[[case]]
+name = "g04_linear_gradients"
+swf = "gen:g04_linear_gradients"
+phase = 2
+
+[[case]]
+name = "g05_radial_gradients"
+swf = "gen:g05_radial_gradients"
+phase = 2
+
+[[case]]
+name = "g06_bitmap_clipped"
+swf = "gen:g06_bitmap_clipped"
+phase = 2
+
+[[case]]
+name = "g07_bitmap_repeat"
+swf = "gen:g07_bitmap_repeat"
+phase = 2
+
+[[case]]
+name = "g08_bitmap_large"
+swf = "gen:g08_bitmap_large"
+phase = 2
+
+[[case]]
+name = "g09_static_text"
+swf = "gen:g09_static_text"
+phase = 2
+
+[[case]]
+name = "g10_morph"
+swf = "gen:g10_morph"
+phase = 2
+
+[[case]]
+name = "g11_nested_sprites"
+swf = "gen:g11_nested_sprites"
+phase = 2
+
+[[case]]
+name = "g12_scaled_stage"
+swf = "gen:g12_scaled_stage"
+phase = 2
+
+[[case]]
+name = "g13_png_in_jpeg2"
+swf = "gen:g13_png_in_jpeg2"
+phase = 2
+
+[[case]]
+name = "ruffle_gradient_issue_9892"
+swf = "tests/ruffle/gradient_issue_9892/test.swf"
+phase = 2
+
+[[case]]
+name = "ruffle_define_bits_lossless2_rgb15"
+swf = "tests/ruffle/define_bits_lossless2_rgb15/test.swf"
+phase = 2
+
+[[case]]
+name = "ruffle_focal_radial"
+swf = "tests/ruffle/simple_shapes_gradients_focal_radial/test.swf"
+phase = 2
+
+[[case]]
+name = "ruffle_gradient_nonsequential_ratios"
+swf = "tests/ruffle/gradient_nonsequential_ratios/test.swf"
+phase = 2
+
+[[case]]
+name = "ruffle_gradient_radial_same_ratios"
+swf = "tests/ruffle/gradient_radial_same_ratios/test.swf"
+phase = 2
+# A 1-2 px ring from coincident gradient stops: Ruffle anti-aliases it, our baked
+# texture plus aliased rasterisation cannot (anti-aliasing is a plan non-goal).
+known_failure = true
+
+[[case]]
+name = "ruffle_gradient_same_ratios"
+swf = "tests/ruffle/gradient_same_ratios/test.swf"
+phase = 2
+
+[[case]]
+name = "ruffle_strokes_scale"
+swf = "tests/ruffle/simple_shapes_strokes_scale/test.swf"
+phase = 2
+
+[[case]]
+name = "ruffle_winding_rule"
+swf = "tests/ruffle/simple_shapes_winding_rule/test.swf"
+phase = 2
+
+[[case]]
+name = "ruffle_color_transform_issue_9698"
+swf = "tests/ruffle/color_transform_issue_9698/test.swf"
+phase = 3
+
+[[case]]
+name = "ruffle_masks"
+swf = "tests/ruffle/simple_shapes_masks/test.swf"
+phase = 3
+
+[[case]]
+name = "ruffle_masks_equal_clipdepth"
+swf = "tests/ruffle/simple_shapes_masks_equal_clipdepth/test.swf"
+phase = 3
+
+[[case]]
+name = "ruffle_blend_add"
+swf = "tests/ruffle/blend_modes_add/test.swf"
+phase = 3
+
+[[case]]
+name = "ruffle_blend_multiply"
+swf = "tests/ruffle/blend_modes_multiply/test.swf"
+phase = 3
+
+[[case]]
+name = "ruffle_blend_screen"
+swf = "tests/ruffle/blend_modes_screen/test.swf"
+phase = 3

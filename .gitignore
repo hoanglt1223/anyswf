@@ -6,3 +6,5 @@
 .vs/
 .vscode/
 *.user
+# Ruffle's MIT/Apache test movies are the one exception (see tests/ruffle/README.md).
+!tests/ruffle/**/*.swf

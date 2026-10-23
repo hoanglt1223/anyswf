@@ -3,8 +3,10 @@
 pub mod assets_bin;
 pub mod bitmaps;
 pub mod characters;
+pub mod convert;
 pub mod device_font;
 pub mod gradients;
+pub mod morph;
 pub mod parse;
 pub mod scripts;
 pub mod sounds;

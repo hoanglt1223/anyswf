@@ -26,10 +26,16 @@ endif()
 
 add_subdirectory(platform)
 add_subdirectory(apps/hello)
+# The PSP renderer (runtime/src/render/ge.c) lands with the GE renderer phase.
+if(NOT PSP)
+    add_subdirectory(runtime)
+    add_subdirectory(apps/player)
+endif()
 
 if(NOT PSP)
     include(CTest)
     if(BUILD_TESTING)
         add_subdirectory(tests/platform)
+        add_subdirectory(tests/runtime)
     endif()
 endif()

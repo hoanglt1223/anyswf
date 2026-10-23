@@ -7,7 +7,15 @@ use crate::bitmaps::Image;
 use swf::{FillStyle, Gradient, GradientInterpolation, GradientSpread};
 
 pub const RAMP_SIZE: usize = 256;
-pub const RADIAL_SIZE: usize = 64;
+/// Radial textures are sized to the gradient's on-screen diameter within these bounds.
+pub const RADIAL_MIN: usize = 32;
+pub const RADIAL_MAX: usize = 256;
+
+/// Texture edge for a radial gradient whose square spans `screen_px` pixels.
+pub fn radial_size(screen_px: f32) -> usize {
+    let want = (screen_px.max(1.0) / 2.0).ceil() as usize;
+    want.next_power_of_two().clamp(RADIAL_MIN, RADIAL_MAX)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Wrap {
@@ -125,7 +133,7 @@ fn sample(r: &[[u8; 4]], t: f32) -> [u8; 4] {
     r[i]
 }
 
-pub fn bake(k: &GradientKey) -> Baked {
+pub fn bake(k: &GradientKey, radial_px: usize) -> Baked {
     let r = ramp(k);
     let spread = GradientSpread::from_u8(k.spread).unwrap_or(GradientSpread::Pad);
     if !k.radial {
@@ -152,7 +160,7 @@ pub fn bake(k: &GradientKey) -> Baked {
         };
     }
     let focal = (k.focal_bits as f32 / 256.0).clamp(-0.98, 0.98);
-    let n = RADIAL_SIZE;
+    let n = radial_px;
     let mut px = Vec::with_capacity(n * n);
     for y in 0..n {
         for x in 0..n {
@@ -242,7 +250,7 @@ mod tests {
     fn linear_ramp_endpoints_and_midpoint() {
         let g = grad(&[(0, Color::BLACK), (255, Color::WHITE)]);
         let (k, _) = key(&FillStyle::LinearGradient(g)).unwrap();
-        let b = bake(&k);
+        let b = bake(&k, 64);
         assert_eq!((b.image.width, b.image.height), (256, 1));
         assert_eq!(b.image.pixel(0, 0), [0, 0, 0, 255]);
         assert_eq!(b.image.pixel(255, 0), [255, 255, 255, 255]);
@@ -254,7 +262,7 @@ mod tests {
     fn colours_hold_outside_the_record_range() {
         let g = grad(&[(64, Color::RED), (192, Color::BLUE)]);
         let (k, _) = key(&FillStyle::LinearGradient(g)).unwrap();
-        let b = bake(&k);
+        let b = bake(&k, 64);
         assert_eq!(b.image.pixel(10, 0), [255, 0, 0, 255]);
         assert_eq!(b.image.pixel(250, 0), [0, 0, 255, 255]);
     }
@@ -263,7 +271,7 @@ mod tests {
     fn radial_centre_and_corner() {
         let g = grad(&[(0, Color::WHITE), (255, Color::BLACK)]);
         let (k, _) = key(&FillStyle::RadialGradient(g)).unwrap();
-        let b = bake(&k);
+        let b = bake(&k, 64);
         let c = b.image.pixel(32, 32)[0];
         assert!(c > 245, "{c}");
         assert_eq!(b.image.pixel(0, 0), [0, 0, 0, 255]);

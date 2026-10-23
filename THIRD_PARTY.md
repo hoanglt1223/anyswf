@@ -10,3 +10,6 @@
 - **symphonia** 0.5.5 (MPL-2.0): used unmodified as a dependency for MP3 decoding.
 - Other crate dependencies (`lyon`, `jpeg-decoder`, `png`, `gif`, `flate2`) are
   MIT OR Apache-2.0.
+- **Ruffle test movies** in `tests/ruffle/` (MIT OR Apache-2.0) and the reference
+  renders in `tests/render/ref/`, which are produced by Ruffle's exporter; see
+  `tests/ruffle/README.md`.
