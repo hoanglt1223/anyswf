@@ -1,6 +1,7 @@
 //! swf2c library: SWF parsing, asset conversion, and (later) AVM1-to-C compilation.
 
 pub mod assets_bin;
+pub mod avm1;
 pub mod bitmaps;
 pub mod characters;
 pub mod convert;

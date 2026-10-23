@@ -24,6 +24,8 @@ else()
     add_compile_options(-Wall -Wextra)
 endif()
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/anyswf-game.cmake)
+
 add_subdirectory(platform)
 add_subdirectory(apps/hello)
 # The PSP renderer (runtime/src/render/ge.c) lands with the GE renderer phase.

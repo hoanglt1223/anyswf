@@ -24,7 +24,8 @@ the `DATA`, `STRS` or `CMDS` blocks (not file offsets). `NONE` is `0xFFFFFFFF`.
 | 34 | 2 | SWF version |
 | 36 | 4 | background colour, bytes R, G, B, A |
 | 40 | 4 | f32 target scale (stage pixels to 480x272 screen pixels, "show all") |
-| 44 | 20 | reserved, zero |
+| 44 | 4 | uncompressed SWF length (MovieClip.getBytesTotal) |
+| 48 | 16 | reserved, zero |
 
 The block directory follows at offset 64: one 16-byte entry per block, `char tag[4]`,
 `u32 offset`, `u32 size`, `u32 count`. Every block starts on a 64-byte boundary of the

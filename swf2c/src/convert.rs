@@ -101,6 +101,7 @@ pub fn convert(swf: &swf::Swf, opts: &Options) -> Result<Output> {
     c.a.swf_version = version as u16;
     c.a.background = u32::from_le_bytes([bg.r, bg.g, bg.b, 255]);
     c.a.target_scale = scale;
+    c.a.swf_size = swf.header.uncompressed_len().max(0) as u32;
     let max_id = chars.map.keys().next_back().copied().unwrap_or(0) as usize;
     c.a.chars = vec![CharEntry::default(); max_id + 1];
 

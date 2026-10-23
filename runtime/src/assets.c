@@ -555,6 +555,7 @@ plat_result swf_assets_parse(swf_assets *out, const void *data, size_t size)
     out->swf_version = rd16(f + 34);
     out->background = rd32(f + 36);
     out->target_scale = rdf(f + 40);
+    out->swf_size = rd32(f + 44);
     if (!(out->target_scale > 0.0f && out->target_scale < 1000.0f) || out->stage[2] <= out->stage[0] ||
         out->stage[3] <= out->stage[1]) {
         plat_log("assets: bad stage geometry");

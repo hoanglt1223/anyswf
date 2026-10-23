@@ -202,6 +202,7 @@ typedef struct swf_assets {
     uint16_t swf_version;
     uint32_t background; /* RGBA bytes, R lowest */
     float target_scale;
+    uint32_t swf_size;   /* uncompressed SWF length */
 
     swf_char *chars;          uint32_t char_count;
     swf_shape *shapes;        uint32_t shape_count;

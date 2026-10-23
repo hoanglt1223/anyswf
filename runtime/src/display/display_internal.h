@@ -16,8 +16,10 @@ enum {
 };
 
 swf_dobj *swf_dobj_new(swf_movie *m, uint16_t char_id, int32_t depth);
-void swf_dobj_free(swf_dobj *o);
-void swf_clip_insert(swf_dobj *clip, swf_dobj *o);
+void swf_dobj_free(swf_movie *m, swf_dobj *o);
+void swf_clip_insert(swf_movie *m, swf_dobj *clip, swf_dobj *o);
+void swf_exec_link(swf_movie *m, swf_dobj *o);
+void swf_flush_graveyard(swf_movie *m);
 void swf_clip_enter_first_frame(swf_movie *m, swf_dobj *clip);
 void swf_clip_next_frame(swf_movie *m, swf_dobj *clip);
 void swf_render_edit_text(swf_movie *m, const swf_dobj *o, const swf_matrix *wm, const swf_cxform *cx);

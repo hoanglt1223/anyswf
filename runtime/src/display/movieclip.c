@@ -22,22 +22,20 @@ plat_result swf_movie_init(swf_movie *m, const swf_assets *a)
     root->name = "";
     root->button_state = 1;
     m->root = root;
+    swf_exec_link(m, root);
     return PLAT_OK;
 }
 
 void swf_movie_free(swf_movie *m)
 {
-    swf_dobj_free(m->root);
+    m->deferring = false;
+    swf_flush_graveyard(m);
+    swf_dobj_free(m, m->root);
     m->root = NULL;
 }
 
-static void advance_tree(swf_movie *m, swf_dobj *clip)
-{
-    if (clip->kind == SWF_CHAR_SPRITE && clip->playing && clip->born_tick < m->tick && clip->frame > 0)
-        swf_clip_next_frame(m, clip);
-    for (swf_dobj *c = clip->children; c; c = c->next) advance_tree(m, c);
-}
-
+/* AVM1 frame order (Ruffle `Avm1::run_frame`): every sprite on the execution list,
+ * newest first, steps its timeline; clips created during the walk start next tick. */
 void swf_movie_advance(swf_movie *m)
 {
     m->tick++;
@@ -45,7 +43,14 @@ void swf_movie_advance(swf_movie *m)
         swf_clip_enter_first_frame(m, m->root);
         return;
     }
-    advance_tree(m, m->root);
+    m->deferring = true;
+    for (swf_dobj *c = m->exec_head; c;) {
+        swf_dobj *next = c->exec_next;
+        if (!c->removed && c->playing && c->born_tick < m->tick && c->frame > 0) swf_clip_next_frame(m, c);
+        c = next;
+    }
+    m->deferring = false;
+    swf_flush_graveyard(m);
 }
 
 int swf_movie_update(swf_movie *m, double dt, int max_frames)

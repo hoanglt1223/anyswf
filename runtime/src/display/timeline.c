@@ -4,9 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Frame scripts run after the frame's display commands; a frame rarely has more than a
- * couple, so a small fixed queue suffices and overflow is reported. */
-#define MAX_FRAME_ACTIONS 32
 
 static uint16_t rd16(const uint8_t *p) { return (uint16_t)(p[0] | (p[1] << 8)); }
 static uint32_t rd32(const uint8_t *p)
@@ -118,7 +115,7 @@ static void do_place(swf_movie *m, swf_dobj *clip, const place_args *pa)
                 o->from_timeline = true;
                 o->place_frame = clip->frame;
                 apply_fields(o, pa);
-                swf_clip_insert(clip, o);
+                swf_clip_insert(m, clip, o);
                 if (o->kind == SWF_CHAR_SPRITE) swf_clip_enter_first_frame(m, o);
                 return;
             }
@@ -129,7 +126,16 @@ static void do_place(swf_movie *m, swf_dobj *clip, const place_args *pa)
         apply_fields(existing, pa);
         return;
     }
-    if (existing || !has_char) return; /* Flash ignores a place on an occupied depth */
+    if (existing && !move && has_char) {
+        /* Flash ignores a place on an occupied depth (and says so in debug players). */
+        if (m->on_warning) {
+            char msg[64];
+            snprintf(msg, sizeof msg, "Failed to place object at depth %d.", (int)pa->depth);
+            m->on_warning(m, msg, m->user);
+        }
+        return;
+    }
+    if (existing || !has_char) return;
     swf_dobj *o = swf_dobj_new(m, pa->char_id, pa->depth);
     if (!o) return;
     o->from_timeline = true;
@@ -139,8 +145,67 @@ static void do_place(swf_movie *m, swf_dobj *clip, const place_args *pa)
         o->clip_action_first = pa->ca_first;
         o->clip_action_count = pa->ca_count;
     }
-    swf_clip_insert(clip, o);
+    swf_clip_insert(m, clip, o);
     if (o->kind == SWF_CHAR_SPRITE) swf_clip_enter_first_frame(m, o);
+}
+
+/* Queues a frame's scripts. Flash runs a clip's frame actions before the first-frame
+ * actions of clips that frame creates, so this happens before the display pass. */
+static void queue_frame_actions(swf_movie *m, swf_dobj *clip, uint32_t f)
+{
+    const swf_assets *a = m->assets;
+    const swf_sprite *s = sprite_of(m, clip);
+    const uint8_t *p = a->cmds + s->frame_offsets[f];
+    const uint8_t *end = a->cmds + s->frame_offsets[f + 1];
+    while (p < end) {
+        uint8_t op = *p++;
+        switch (op) {
+        case SWF_CMD_PLACE: {
+            place_args pa = {0};
+            p = read_place(a, p, &pa);
+            break;
+        }
+        case SWF_CMD_REMOVE: p += 2; break;
+        case SWF_CMD_ACTION:
+            if (m->on_action) m->on_action(m, clip, rd32(p), m->user);
+            else swf_warn_once(m, SWF_WARN_ACTIONS, "timeline: frame scripts present but no compiled code is linked");
+            p += 4;
+            break;
+        case SWF_CMD_START_SOUND: p += 16; break;
+        case SWF_CMD_STREAM_BLOCK: p += 4; break;
+        default: return; /* unreachable after validation */
+        }
+    }
+}
+
+static void frame_sounds(swf_movie *m, swf_dobj *clip, uint32_t f)
+{
+    if (!m->on_sound) return;
+    const swf_assets *a = m->assets;
+    const swf_sprite *s = sprite_of(m, clip);
+    const uint8_t *p = a->cmds + s->frame_offsets[f];
+    const uint8_t *end = a->cmds + s->frame_offsets[f + 1];
+    while (p < end) {
+        uint8_t op = *p++;
+        switch (op) {
+        case SWF_CMD_PLACE: {
+            place_args pa = {0};
+            p = read_place(a, p, &pa);
+            break;
+        }
+        case SWF_CMD_REMOVE: p += 2; break;
+        case SWF_CMD_ACTION: p += 4; break;
+        case SWF_CMD_START_SOUND:
+            m->on_sound(m, clip, p, m->user);
+            p += 16;
+            break;
+        case SWF_CMD_STREAM_BLOCK:
+            m->on_sound(m, clip, p - 1, m->user);
+            p += 4;
+            break;
+        default: return;
+        }
+    }
 }
 
 /* Applies one frame (0-based) of a clip's timeline. Scripts and sounds only fire when
@@ -149,10 +214,9 @@ static void apply_frame(swf_movie *m, swf_dobj *clip, uint32_t f, bool live)
 {
     const swf_assets *a = m->assets;
     const swf_sprite *s = sprite_of(m, clip);
+    if (live) queue_frame_actions(m, clip, f);
     const uint8_t *p = a->cmds + s->frame_offsets[f];
     const uint8_t *end = a->cmds + s->frame_offsets[f + 1];
-    uint32_t actions[MAX_FRAME_ACTIONS];
-    int n_actions = 0;
     while (p < end) {
         uint8_t op = *p++;
         switch (op) {
@@ -168,15 +232,7 @@ static void apply_frame(swf_movie *m, swf_dobj *clip, uint32_t f, bool live)
             swf_clip_remove_child(m, clip, rd16(p));
             p += 2;
             break;
-        case SWF_CMD_ACTION:
-            if (live) {
-                if (n_actions < MAX_FRAME_ACTIONS)
-                    actions[n_actions++] = rd32(p);
-                else
-                    plat_log("timeline: more than %d scripts in one frame; extra ones skipped", MAX_FRAME_ACTIONS);
-            }
-            p += 4;
-            break;
+        case SWF_CMD_ACTION: p += 4; break;
         case SWF_CMD_START_SOUND:
             if (live && m->on_sound) m->on_sound(m, clip, p, m->user);
             p += 16;
@@ -187,41 +243,6 @@ static void apply_frame(swf_movie *m, swf_dobj *clip, uint32_t f, bool live)
             break;
         default:
             return; /* unreachable after validation */
-        }
-    }
-    if (n_actions && !m->on_action) {
-        swf_warn_once(m, SWF_WARN_ACTIONS, "timeline: frame scripts present but no compiled code is linked");
-        return;
-    }
-    for (int i = 0; i < n_actions; i++) m->on_action(m, clip, actions[i], m->user);
-}
-
-/* Runs only the scripts and sounds of a frame (after a rewind rebuilt its display list). */
-static void run_frame_scripts(swf_movie *m, swf_dobj *clip, uint32_t f)
-{
-    const swf_assets *a = m->assets;
-    const swf_sprite *s = sprite_of(m, clip);
-    const uint8_t *p = a->cmds + s->frame_offsets[f];
-    const uint8_t *end = a->cmds + s->frame_offsets[f + 1];
-    while (p < end) {
-        uint8_t op = *p++;
-        if (op == SWF_CMD_PLACE) {
-            place_args pa = {0};
-            p = read_place(a, p, &pa);
-        } else if (op == SWF_CMD_REMOVE) {
-            p += 2;
-        } else if (op == SWF_CMD_ACTION) {
-            if (m->on_action)
-                m->on_action(m, clip, rd32(p), m->user);
-            else
-                swf_warn_once(m, SWF_WARN_ACTIONS, "timeline: frame scripts present but no compiled code is linked");
-            p += 4;
-        } else if (op == SWF_CMD_START_SOUND) {
-            if (m->on_sound) m->on_sound(m, clip, p, m->user);
-            p += 16;
-        } else {
-            if (m->on_sound) m->on_sound(m, clip, p - 1, m->user);
-            p += 4;
         }
     }
 }
@@ -336,6 +357,7 @@ static void goto_backward(swf_movie *m, swf_dobj *clip, uint32_t frame)
         return;
     }
     clip->frame = frame;
+    queue_frame_actions(m, clip, frame - 1);
     swf_dobj **pp = &clip->children;
     while (*pp) {
         swf_dobj *c = *pp;
@@ -353,7 +375,7 @@ static void goto_backward(swf_movie *m, swf_dobj *clip, uint32_t frame)
             pp = &c->next;
         } else {
             *pp = c->next;
-            swf_dobj_free(c);
+            swf_dobj_free(m, c);
         }
     }
     for (int i = 0; i < p.n; i++) {
@@ -368,7 +390,7 @@ static void goto_backward(swf_movie *m, swf_dobj *clip, uint32_t frame)
     }
     clip->frame = frame;
     free(p.e);
-    run_frame_scripts(m, clip, frame - 1);
+    frame_sounds(m, clip, frame - 1);
 }
 
 void swf_clip_goto(swf_movie *m, swf_dobj *clip, uint32_t frame)

@@ -1,5 +1,6 @@
+# anyswf-player: plays assets.bin without compiled ActionScript.
 add_executable(anyswf-player main.c png_write.c)
-target_link_libraries(anyswf-player PRIVATE swfrt)
+target_link_libraries(anyswf-player PRIVATE swfrt_nocode)
 target_include_directories(anyswf-player PRIVATE ${PROJECT_SOURCE_DIR}/runtime/src)
 
 if(PSP)

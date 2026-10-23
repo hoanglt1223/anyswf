@@ -185,6 +185,8 @@ pub struct Assets {
     pub swf_version: u16,
     pub background: u32,
     pub target_scale: f32,
+    /// Uncompressed SWF length (MovieClip.getBytesTotal on the root).
+    pub swf_size: u32,
     pub chars: Vec<CharEntry>,
     pub shapes: Vec<ShapeRec>,
     pub draws: Vec<DrawRec>,
@@ -517,7 +519,7 @@ pub fn serialize(a: &Assets) -> Vec<u8> {
     o.u16(a.swf_version);
     o.u32(a.background);
     o.f32(a.target_scale);
-    o.u32(0);
+    o.u32(a.swf_size);
     for _ in 0..4 {
         o.u32(0);
     }

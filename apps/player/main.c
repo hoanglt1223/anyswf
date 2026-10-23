@@ -5,6 +5,7 @@
  * PSP: loads assets.bin from the EBOOT folder and plays until exit. */
 #include "platform.h"
 #include "render/render.h"
+#include "swfrt/avm1.h"
 #include "swfrt/movie.h"
 
 #include <stdio.h>
@@ -109,12 +110,22 @@ int main(int argc, char **argv)
         plat_shutdown();
         return 1;
     }
+    swf_vm *vm = swf_vm_new(&movie, &SWF_GAME_CODE);
+    if (!vm) {
+        swf_movie_free(&movie);
+        swf_render_shutdown();
+        swf_assets_free(&assets);
+        plat_shutdown();
+        return 1;
+    }
+    swf_vm_run_init_actions(vm);
     uint32_t bg = assets.background;
     uint32_t clear = ((bg & 0xFF) << 16) | (bg & 0xFF00) | ((bg >> 16) & 0xFF);
     long shown = 0;
     uint64_t last = plat_time_us();
     while (plat_frame_begin(clear)) {
-        if (a.screenshot) {
+        if (a.screenshot || a.headless) {
+            /* Headless runs are deterministic: one SWF frame per displayed frame. */
             swf_movie_advance(&movie);
         } else {
             uint64_t now = plat_time_us();
@@ -122,6 +133,8 @@ int main(int argc, char **argv)
             else swf_movie_update(&movie, (now - last) / 1e6, 4);
             last = now;
         }
+        swf_vm_run_queue(vm);
+        swf_vm_collect(vm);
         swf_movie_render(&movie);
         shown++;
 #ifndef __PSP__
@@ -139,6 +152,7 @@ int main(int argc, char **argv)
         if (a.frames > 0 && shown >= a.frames) break;
     }
     swf_movie_free(&movie);
+    swf_vm_free(vm);
     swf_render_shutdown();
     swf_assets_free(&assets);
     plat_shutdown();

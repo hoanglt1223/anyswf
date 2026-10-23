@@ -63,6 +63,10 @@ struct swf_dobj {
     bool playing;
     uint32_t born_tick;   /* clips placed during a tick do not also advance in it */
     swf_dobj *children;
+    /* AVM1 execution list: sprites newest first (Ruffle `clip_exec_list`). */
+    swf_dobj *exec_next, *exec_prev;
+    struct swf_movie *exec_owner;
+    bool removed;
 
     /* Text fields: current text (owned, UTF-8); NULL shows the initial text. */
     char *text;
@@ -86,7 +90,15 @@ typedef struct swf_movie {
     swf_sound_fn on_sound;
     void *user;
     uint32_t warned;      /* bit set of one-time warnings already logged */
+    swf_dobj *exec_head;
+    bool deferring;       /* frees are postponed while the execution list is walked */
+    swf_dobj *graveyard;
+    /* Flash Player warnings that appear in trace output ("Warning: ..."). */
+    void (*on_warning)(struct swf_movie *m, const char *msg, void *user);
 } swf_movie;
+
+/* Called when a display object with a script object is destroyed (set by the VM). */
+extern void (*swf_dobj_free_hook)(swf_dobj *o);
 
 plat_result swf_movie_init(swf_movie *m, const swf_assets *a);
 void swf_movie_free(swf_movie *m);

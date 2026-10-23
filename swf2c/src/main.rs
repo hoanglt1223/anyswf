@@ -9,6 +9,8 @@ commands:
   inspect <game.swf>                       print the header and character table
   assets <game.swf> -o <assets.bin>        convert shapes, bitmaps, sounds and timelines
          [--tolerance <px>]                curve flattening error in screen pixels (default 0.35)
+  compile <game.swf> -o <dir>              write <dir>/game.c (compiled ActionScript) and
+         [--tolerance <px>]                <dir>/assets.bin
   help                                     show this message
   version                                  print the swf2c version
 ";
@@ -19,6 +21,11 @@ enum Command {
     Version,
     Inspect(PathBuf),
     Assets {
+        input: PathBuf,
+        output: PathBuf,
+        tolerance: f32,
+    },
+    Compile {
         input: PathBuf,
         output: PathBuf,
         tolerance: f32,
@@ -37,7 +44,8 @@ fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Command, ArgErr
             (Some(p), None) => Ok(Command::Inspect(p.into())),
             _ => Err(ArgError("inspect takes exactly one SWF path".into())),
         },
-        Some("assets") => {
+        Some(cmd @ ("assets" | "compile")) => {
+            let compile = cmd == "compile";
             let mut input = None;
             let mut output = None;
             let mut tolerance = convert::Options::default().tolerance_px;
@@ -59,18 +67,55 @@ fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Command, ArgErr
                 }
             }
             match (input, output) {
+                (Some(i), Some(o)) if compile => Ok(Command::Compile {
+                    input: i.into(),
+                    output: o.into(),
+                    tolerance,
+                }),
                 (Some(i), Some(o)) => Ok(Command::Assets {
                     input: i.into(),
                     output: o.into(),
                     tolerance,
                 }),
-                _ => Err(ArgError(
-                    "assets needs <game.swf> and -o <assets.bin>".into(),
-                )),
+                _ => Err(ArgError(format!("{cmd} needs <game.swf> and -o <path>"))),
             }
         }
         Some(other) => Err(ArgError(format!("unknown command '{other}'"))),
     }
+}
+
+fn write_file(path: &std::path::Path, data: &[u8]) -> Result<(), swf2c::Error> {
+    std::fs::write(path, data)
+        .map_err(|e| swf2c::Error::new(format!("cannot write {}: {e}", path.display())))
+}
+
+fn convert_assets(
+    swf: &swf::Swf,
+    tolerance: f32,
+    output: &std::path::Path,
+) -> Result<(), swf2c::Error> {
+    let out = convert::convert(
+        swf,
+        &convert::Options {
+            tolerance_px: tolerance,
+        },
+    )?;
+    for w in &out.warnings {
+        eprintln!("swf2c: warning: {w}");
+    }
+    let bin = assets_bin::serialize(&out.assets);
+    write_file(output, &bin)?;
+    let s = &out.stats;
+    println!(
+        "swf2c: {} bytes -> {} ({} draws, {} triangles, {} KiB textures, {} KiB sound)",
+        bin.len(),
+        output.display(),
+        s.draws,
+        s.triangles,
+        s.texture_bytes / 1024,
+        s.sound_bytes / 1024
+    );
+    Ok(())
 }
 
 fn run(cmd: Command) -> Result<(), swf2c::Error> {
@@ -90,28 +135,36 @@ fn run(cmd: Command) -> Result<(), swf2c::Error> {
         } => {
             let buf = parse::read_file(&input)?;
             let swf = parse::parse(&buf)?;
-            let out = convert::convert(
-                &swf,
-                &convert::Options {
-                    tolerance_px: tolerance,
-                },
-            )?;
-            for w in &out.warnings {
+            convert_assets(&swf, tolerance, &output)?;
+        }
+        Command::Compile {
+            input,
+            output,
+            tolerance,
+        } => {
+            let buf = parse::read_file(&input)?;
+            let swf = parse::parse(&buf)?;
+            std::fs::create_dir_all(&output).map_err(|e| {
+                swf2c::Error::new(format!("cannot create {}: {e}", output.display()))
+            })?;
+            convert_assets(&swf, tolerance, &output.join("assets.bin"))?;
+            let scripts = swf2c::scripts::Scripts::collect(&swf.tags);
+            let name = input
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let code = swf2c::avm1::emit_c::emit_movie(swf.header.version(), &scripts, &name)?;
+            for w in &code.warnings {
                 eprintln!("swf2c: warning: {w}");
             }
-            let bin = assets_bin::serialize(&out.assets);
-            std::fs::write(&output, &bin).map_err(|e| {
-                swf2c::Error::new(format!("cannot write {}: {e}", output.display()))
-            })?;
-            let s = &out.stats;
+            let c_path = output.join("game.c");
+            write_file(&c_path, code.source.as_bytes())?;
             println!(
-                "swf2c: {} bytes -> {} ({} draws, {} triangles, {} KiB textures, {} KiB sound)",
-                bin.len(),
-                output.display(),
-                s.draws,
-                s.triangles,
-                s.texture_bytes / 1024,
-                s.sound_bytes / 1024
+                "swf2c: {} scripts, {} functions ({} with a dynamic stack) -> {}",
+                scripts.list.len(),
+                code.functions,
+                code.dynamic_blocks,
+                c_path.display()
             );
         }
     }
