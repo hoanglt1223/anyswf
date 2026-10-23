@@ -194,26 +194,13 @@ static swf_val s_split(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val 
     return swf_objv(array_new(cx, n, parts));
 }
 
-/* Flash's case mapping covers Latin-1 and a few other ranges; ASCII and Latin-1 are
- * handled here, which covers the characters ActionScript sources use in practice. */
-static uint16_t lower(uint16_t c)
-{
-    if ((c >= 'A' && c <= 'Z') || (c >= 0xC0 && c <= 0xDE && c != 0xD7)) return (uint16_t)(c + 32);
-    return c;
-}
-
-static uint16_t upper(uint16_t c)
-{
-    if ((c >= 'a' && c <= 'z') || (c >= 0xE0 && c <= 0xFE && c != 0xF7)) return (uint16_t)(c - 32);
-    return c;
-}
 
 static swf_val s_to_lower(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv)
 {
     (void)argc; (void)argv;
     swf_str *s = this_string(cx, this_);
     swf_str *r = str_new(cx->vm, s->len);
-    for (uint32_t i = 0; i < s->len; i++) r->ch[i] = lower(s->ch[i]);
+    for (uint32_t i = 0; i < s->len; i++) r->ch[i] = swf_char_lower(s->ch[i]);
     return swf_strv(r);
 }
 
@@ -222,7 +209,7 @@ static swf_val s_to_upper(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_v
     (void)argc; (void)argv;
     swf_str *s = this_string(cx, this_);
     swf_str *r = str_new(cx->vm, s->len);
-    for (uint32_t i = 0; i < s->len; i++) r->ch[i] = upper(s->ch[i]);
+    for (uint32_t i = 0; i < s->len; i++) r->ch[i] = swf_char_upper(s->ch[i]);
     return swf_strv(r);
 }
 

@@ -678,6 +678,11 @@ void builtins_global(swf_vm *vm)
     native_method(vm, g, "trace", g_trace, ATTR_DONT_ENUM);
     native_method(vm, g, "ASSetPropFlags", g_set_prop_flags, ATTR_DONT_ENUM);
     native_method(vm, g, "updateAfterEvent", g_noop, ATTR_DONT_ENUM);
-    obj_define_ascii(vm, g, "NaN", swf_num(NAN), ATTR_DONT_ENUM);
-    obj_define_ascii(vm, g, "Infinity", swf_num(INFINITY), ATTR_DONT_ENUM);
+    /* Flash's playerglobals leave a scratch variable "o" set to null. */
+    obj_define_ascii(vm, g, "o", swf_null(), 0);
+    /* SWF 4 movies read these globals as undefined. */
+    if (vm->version > 4) {
+        obj_define_ascii(vm, g, "NaN", swf_num(NAN), ATTR_DONT_ENUM);
+        obj_define_ascii(vm, g, "Infinity", swf_num(INFINITY), ATTR_DONT_ENUM);
+    }
 }

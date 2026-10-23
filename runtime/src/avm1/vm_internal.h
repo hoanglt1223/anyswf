@@ -149,6 +149,8 @@ swf_str *str_sub(swf_vm *vm, swf_str *s, uint32_t start, uint32_t end);
 bool str_eq(const swf_str *a, const swf_str *b);
 bool str_eq_ascii(const swf_str *a, const char *s);
 bool str_eq_nocase(const swf_str *a, const swf_str *b);
+uint16_t swf_char_lower(uint16_t c);
+uint16_t swf_char_upper(uint16_t c);
 int str_cmp(const swf_str *a, const swf_str *b);
 /* Encodes as UTF-8 into a malloc'd, NUL-terminated buffer. */
 char *str_to_utf8(const swf_str *s, size_t *len);

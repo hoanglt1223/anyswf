@@ -163,7 +163,6 @@ swf_obj *resolve_target_path(swf_ctx *cx, swf_dobj *root, swf_obj *start, const 
     while (i < to) {
         if (swf5)
             while (i < to && path->ch[i] == ':') i++;
-        if (i >= to) break;
         swf_val val;
         bool dotdot = i + 1 < to && path->ch[i] == '.' && path->ch[i + 1] == '.' &&
                       (i + 2 >= to || path->ch[i + 2] == '/' || (swf5 && path->ch[i + 2] == ':'));

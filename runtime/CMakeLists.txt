@@ -6,6 +6,7 @@ add_library(swfrt STATIC
     src/display/edit_text.c
     src/render/color_transform.c
     src/avm1/value.c
+    src/avm1/casemap.c
     src/avm1/gc.c
     src/avm1/object.c
     src/avm1/coerce.c

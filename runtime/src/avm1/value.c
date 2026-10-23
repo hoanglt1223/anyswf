@@ -124,19 +124,11 @@ bool str_eq_ascii(const swf_str *a, const char *s)
     return true;
 }
 
-/* Case folding used for SWF 6 and older identifiers: ASCII and Latin-1 letters. */
-static uint16_t fold_unit(uint16_t c)
-{
-    if (c >= 'A' && c <= 'Z') return (uint16_t)(c + 32);
-    if (c >= 0xC0 && c <= 0xDE && c != 0xD7) return (uint16_t)(c + 32);
-    return c;
-}
-
 bool str_eq_nocase(const swf_str *a, const swf_str *b)
 {
     if (a->len != b->len) return false;
     for (uint32_t i = 0; i < a->len; i++)
-        if (fold_unit(a->ch[i]) != fold_unit(b->ch[i])) return false;
+        if (swf_char_lower(a->ch[i]) != swf_char_lower(b->ch[i])) return false;
     return true;
 }
 
@@ -170,7 +162,7 @@ static uint32_t hash_units(const uint16_t *u, uint32_t n, bool fold)
 {
     uint32_t h = 2166136261u;
     for (uint32_t i = 0; i < n; i++) {
-        h ^= fold ? fold_unit(u[i]) : u[i];
+        h ^= fold ? swf_char_lower(u[i]) : u[i];
         h *= 16777619u;
     }
     return h;
@@ -226,14 +218,14 @@ static swf_str *atom_lookup_insert(swf_vm *vm, const uint16_t *u, uint32_t n, sw
     /* The fold atom is the lower-cased text (itself when already lower case). */
     bool lower = true;
     for (uint32_t k = 0; k < n; k++)
-        if (fold_unit(u[k]) != u[k]) lower = false;
+        if (swf_char_lower(u[k]) != u[k]) lower = false;
     if (lower) {
         s->fold = s;
     } else {
         uint16_t stackbuf[64];
         uint16_t *f = n <= 64 ? stackbuf : malloc(n * sizeof(uint16_t));
         if (!f) vm_abort(vm, "out of memory folding an identifier");
-        for (uint32_t k = 0; k < n; k++) f[k] = fold_unit(u[k]);
+        for (uint32_t k = 0; k < n; k++) f[k] = swf_char_lower(u[k]);
         s->fold = atom_lookup_insert(vm, f, n, NULL);
         if (f != stackbuf) free(f);
     }

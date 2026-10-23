@@ -310,9 +310,7 @@ static int str_cmp_nocase(const swf_str *a, const swf_str *b)
 {
     uint32_t n = a->len < b->len ? a->len : b->len;
     for (uint32_t i = 0; i < n; i++) {
-        uint16_t x = a->ch[i], y = b->ch[i];
-        if (x >= 'A' && x <= 'Z') x = (uint16_t)(x + 32);
-        if (y >= 'A' && y <= 'Z') y = (uint16_t)(y + 32);
+        uint16_t x = swf_char_lower(a->ch[i]), y = swf_char_lower(b->ch[i]);
         if (x != y) return x < y ? -1 : 1;
     }
     return a->len < b->len ? -1 : a->len > b->len ? 1 : 0;

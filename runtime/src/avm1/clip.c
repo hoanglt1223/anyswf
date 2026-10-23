@@ -46,30 +46,32 @@ swf_obj *clip_object(swf_vm *vm, swf_dobj *d)
     return o;
 }
 
+/* Decodes one UTF-8 sequence as a UTF-16 unit; characters outside the BMP never match
+ * an identifier unit-for-unit here, so they map to a non-character. */
+static uint16_t utf8_unit(const unsigned char **p)
+{
+    uint32_t c = *(*p)++;
+    int extra = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC0 ? 1 : 0;
+    if (extra) c &= 0x3Fu >> extra;
+    for (int k = 0; k < extra && **p; k++) c = (c << 6) | (*(*p)++ & 0x3F);
+    return c >= 0x10000 ? 0xFFFF : (uint16_t)c;
+}
+
 swf_dobj *clip_child_by_name(swf_vm *vm, swf_dobj *d, const swf_str *name, uint32_t from, uint32_t to)
 {
     if (!d) return NULL;
-    size_t n = to - from;
-    swf_dobj *best = NULL;
     for (swf_dobj *c = d->children; c; c = c->next) {
-        const char *cn = c->name;
-        if (!cn || !cn[0]) continue;
-        /* Names are ASCII in practice; compare unit-wise against the UTF-8 bytes. */
-        size_t len = strlen(cn);
-        if (len != n) continue;
-        bool eq = true;
-        for (size_t i = 0; i < n && eq; i++) {
-            uint16_t a = name->ch[from + i], b = (unsigned char)cn[i];
-            if (a == b) continue;
-            if (!vm->case_sensitive && a < 128 && b < 128 && (a | 0x20) == (b | 0x20) && (b | 0x20) >= 'a' &&
-                (b | 0x20) <= 'z')
-                continue;
-            eq = false;
+        if (!c->name || !c->name[0]) continue;
+        const unsigned char *p = (const unsigned char *)c->name;
+        uint32_t i = from;
+        for (; i < to && *p; i++) {
+            uint16_t a = name->ch[i], b = utf8_unit(&p);
+            if (a != b && (vm->case_sensitive || swf_char_lower(a) != swf_char_lower(b))) break;
         }
         /* With duplicate names the lowest depth wins. */
-        if (eq && !best) best = c;
+        if (i == to && !*p) return c;
     }
-    return best;
+    return NULL;
 }
 
 static void path_rec(swf_vm *vm, swf_dobj *d, char *buf, size_t cap, size_t *len, bool slash)
