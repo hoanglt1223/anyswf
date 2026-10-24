@@ -14,3 +14,5 @@
 - **Ruffle test movies** in `tests/ruffle/` (MIT OR Apache-2.0) and the reference
   renders in `tests/render/ref/`, which are produced by Ruffle's exporter; see
   `tests/ruffle/README.md`.
+- **Ruffle AVM1 tests** in `tests/ruffle-avm1/` (MIT OR Apache-2.0): test movies,
+  Flash Player trace output and `.fla` sources; see `tests/ruffle-avm1/README.md`.

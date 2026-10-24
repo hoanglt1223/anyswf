@@ -5,11 +5,12 @@ homebrew (`EBOOT.PBP`) plus a PC debug build. ActionScript bytecode is compiled
 to C and vector art is tessellated at build time, so the PSP only runs native
 code and draws triangles.
 
-Status: early. The platform layer, the asset pipeline (`swf2c assets`) and the
-PC renderer with display list and timeline playback work; ActionScript
-compilation and the PSP renderer are in progress. No game content ships with
-this project: bring your own files. The only SWFs in the repository are Ruffle's
-MIT/Apache test movies in `tests/ruffle/`.
+Status: early. The platform layer, the asset pipeline (`swf2c assets`), the PC
+renderer (display list, timeline, colour transforms, masks, add/multiply/screen
+blend modes) and the AVM1 compiler (`swf2c compile`) work on PC. The PSP GE
+renderer builds but has not yet been checked on hardware. No game content ships
+with this project: bring your own files. The only SWFs in the repository are
+Ruffle's MIT/Apache test movies in `tests/ruffle/` and `tests/ruffle-avm1/`.
 
 ## Layout
 
@@ -26,7 +27,9 @@ MIT/Apache test movies in `tests/ruffle/`.
 | `tests/swf-src/` | Self-authored AS2 tests (`*.as`) with expected trace output |
 | `tests/runtime/` | Runtime unit tests (loader validation, timeline) |
 | `tests/render/` | Render tests: cases, Ruffle reference PNGs, comparison scripts |
-| `tests/ruffle/` | Test SWFs copied from Ruffle (MIT/Apache-2.0) |
+| `tests/ruffle/` | Render test SWFs copied from Ruffle (MIT/Apache-2.0) |
+| `tests/ruffle-avm1/` | AVM1 test SWFs and Flash Player traces copied from Ruffle (MIT/Apache-2.0) |
+| `tests/avm1/` | AVM1 conformance runner (compile, build, run headless, diff traces) |
 | `cmake/psp.cmake` | PSP toolchain file (wraps pspdev's) |
 | `docker/psp-build.Dockerfile` | Pinned `pspdev/pspdev` build image |
 
@@ -54,7 +57,7 @@ audio progress and the save-file round trip (exit code 1 on failure).
 PSP (needs Docker; works from Windows through Git Bash):
 
 ```sh
-scripts/psp-build.sh                                  # -> out/psp/apps/hello/EBOOT.PBP
+scripts/psp-build.sh                                  # -> out/psp/apps/{hello,player}/EBOOT.PBP
 PSP_CMAKE_ARGS=-DBUILD_PRX=ON scripts/psp-build.sh    # PRX for psplink
 ```
 
@@ -84,6 +87,17 @@ Test corpus (MTASC 1.14, fetched with a pinned checksum into `tools/`):
 tests/fetch-mtasc.sh
 tests/build-corpus.sh            # -> out/corpus/*.swf + *.expected
 ```
+
+AVM1 conformance (self-authored corpus plus `tests/ruffle-avm1`; passes at 100% of
+the corpus and at least 80% of the Ruffle tests):
+
+```sh
+python tests/avm1/run-avm1-tests.py --swf2c <swf2c> --out out/avm1 --corpus out/corpus \
+    [--generator "Visual Studio 17 2022"] [--only ruffle_<name> ...]
+```
+
+Releases: pushing a `v*` tag runs `.github/workflows/release.yml`, which publishes
+swf2c and anyswf-player for Windows, Linux and macOS plus the PSP EBOOTs.
 
 ## Controls on PC
 
