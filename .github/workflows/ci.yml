@@ -64,8 +64,10 @@ jobs:
       - run: bash scripts/psp-build.sh Release
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: hello-eboot
-          path: out/psp/apps/hello/EBOOT.PBP
+          name: psp-eboots
+          path: |
+            out/psp/apps/hello/EBOOT.PBP
+            out/psp/apps/player/EBOOT.PBP
           if-no-files-found: error
 
   corpus:

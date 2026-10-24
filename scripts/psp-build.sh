@@ -2,7 +2,7 @@
 # Builds the PSP target. Outside the container it builds the pinned image and
 # re-runs itself inside it; inside (PSPDEV set) it runs CMake.
 #
-#   scripts/psp-build.sh [Release|Debug]     output: out/psp/apps/hello/EBOOT.PBP
+#   scripts/psp-build.sh [Release|Debug]     output: out/psp/apps/{hello,player}/EBOOT.PBP
 #
 # Extra CMake arguments go in PSP_CMAKE_ARGS, e.g. PSP_CMAKE_ARGS=-DBUILD_PRX=ON for psplink.
 set -euo pipefail
@@ -34,6 +34,8 @@ cmake -S "$root" -B "$build_dir" \
     ${PSP_CMAKE_ARGS:-}
 cmake --build "$build_dir" --parallel
 
-pbp="$build_dir/apps/hello/EBOOT.PBP"
-[ -f "$pbp" ] || { echo "psp-build: $pbp was not produced" >&2; exit 1; }
-echo "psp-build: $pbp"
+for app in hello player; do
+    pbp="$build_dir/apps/$app/EBOOT.PBP"
+    [ -f "$pbp" ] || { echo "psp-build: $pbp was not produced" >&2; exit 1; }
+    echo "psp-build: $pbp"
+done

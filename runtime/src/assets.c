@@ -1,9 +1,10 @@
 #include "swfrt/assets.h"
 
 #include <stdlib.h>
+#include <inttypes.h>
 #include <string.h>
 
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__PSP__)
 #include <malloc.h>
 #endif
 
@@ -88,13 +89,13 @@ static bool table(const ctx *c, const char tag[4], uint32_t rec, block *out)
 {
     if (!find_block(c, tag, out)) return false;
     if (out->p && (uint64_t)out->count * rec != out->size)
-        FAIL("block %.4s has %u bytes for %u records of %u", tag, out->size, out->count, rec);
+        FAIL("block %.4s has %" PRIu32 " bytes for %" PRIu32 " records of %" PRIu32, tag, out->size, out->count, rec);
     return true;
 }
 
 static bool str_ref(const ctx *c, uint32_t off, const char **out)
 {
-    if (off >= c->strs.size) FAIL("string offset %u out of range in %s", off, c->what);
+    if (off >= c->strs.size) FAIL("string offset %" PRIu32 " out of range in %s", off, c->what);
     *out = (const char *)c->strs.p + off;
     return true;
 }
@@ -102,7 +103,7 @@ static bool str_ref(const ctx *c, uint32_t off, const char **out)
 static bool data_ref(const ctx *c, uint32_t off, uint64_t size, uint32_t align, const uint8_t **out)
 {
     if (off % align != 0 || off > c->data.size || size > c->data.size - off)
-        FAIL("data range %u+%llu invalid in %s", off, (unsigned long long)size, c->what);
+        FAIL("data range %" PRIu32 "+%llu invalid in %s", off, (unsigned long long)size, c->what);
     *out = c->data.p + off;
     return true;
 }
@@ -137,23 +138,23 @@ static bool parse_textures(swf_assets *a, ctx *c)
         case SWF_TEX_565: case SWF_TEX_5551: case SWF_TEX_4444: bpp = 16; break;
         case SWF_TEX_8888: bpp = 32; break;
         case SWF_TEX_CLUT8: bpp = 8; break;
-        default: FAIL("texture %u has unknown format %u", i, t->format);
+        default: FAIL("texture %" PRIu32 " has unknown format %u", i, t->format);
         }
         if (!tex_size_ok(t->width) || !tex_size_ok(t->height) || t->used_w == 0 || t->used_h == 0 ||
             t->used_w > t->width || t->used_h > t->height)
-            FAIL("texture %u has bad size %ux%u (%ux%u used)", i, t->width, t->height, t->used_w, t->used_h);
+            FAIL("texture %" PRIu32 " has bad size %ux%u (%ux%u used)", i, t->width, t->height, t->used_w, t->used_h);
         uint64_t need = (uint64_t)t->width * t->height * bpp / 8;
         t->data_size = rd32(r + 16);
-        if (t->data_size != need) FAIL("texture %u data is %u bytes, expected %llu", i, t->data_size, (unsigned long long)need);
+        if (t->data_size != need) FAIL("texture %" PRIu32 " data is %" PRIu32 " bytes, expected %llu", i, t->data_size, (unsigned long long)need);
         if ((t->flags & SWF_TEX_SWIZZLED) && ((t->width * bpp / 8) % 16 != 0 || t->height % 8 != 0))
-            FAIL("texture %u cannot be swizzled at %ux%u", i, t->width, t->height);
+            FAIL("texture %" PRIu32 " cannot be swizzled at %ux%u", i, t->width, t->height);
         const uint8_t *p;
         if (!data_ref(c, rd32(r + 12), t->data_size, 16, &p)) return false;
         t->data = p;
         t->clut = NULL;
         if (t->format == SWF_TEX_CLUT8) {
             if (t->clut_count == 0 || t->clut_count > 256 || t->clut_count % 16 != 0)
-                FAIL("texture %u has %u palette entries", i, t->clut_count);
+                FAIL("texture %" PRIu32 " has %u palette entries", i, t->clut_count);
             if (!data_ref(c, rd32(r + 20), (uint64_t)t->clut_count * 4, 16, &p)) return false;
             t->clut = p;
         }
@@ -178,12 +179,12 @@ static bool parse_shapes(swf_assets *a, ctx *c)
         d->texture = rd32(r + 4);
         d->vertex_count = rd32(r + 12);
         d->index_count = rd32(r + 20);
-        if (r[0] > 1 || d->shift > 16) FAIL("draw %u has bad kind or shift", i);
+        if (r[0] > 1 || d->shift > 16) FAIL("draw %" PRIu32 " has bad kind or shift", i);
         if (d->textured ? d->texture >= a->texture_count : d->texture != SWF_NONE)
-            FAIL("draw %u has bad texture %u", i, d->texture);
+            FAIL("draw %" PRIu32 " has bad texture %" PRIu32, i, d->texture);
         if (d->vertex_count == 0 || d->vertex_count > 65535 || d->index_count == 0 ||
             d->index_count > 65535 || d->index_count % 3 != 0)
-            FAIL("draw %u has %u vertices / %u indices", i, d->vertex_count, d->index_count);
+            FAIL("draw %" PRIu32 " has %" PRIu32 " vertices / %" PRIu32 " indices", i, d->vertex_count, d->index_count);
         const uint8_t *p;
         uint32_t vsize = d->textured ? SWF_TEX_VERTEX_SIZE : SWF_SOLID_VERTEX_SIZE;
         if (!data_ref(c, rd32(r + 8), (uint64_t)d->vertex_count * vsize, 16, &p)) return false;
@@ -191,7 +192,7 @@ static bool parse_shapes(swf_assets *a, ctx *c)
         if (!data_ref(c, rd32(r + 16), (uint64_t)d->index_count * 2, 16, &p)) return false;
         d->indices = (const uint16_t *)p;
         for (uint32_t k = 0; k < d->index_count; k++)
-            if (rd16(p + k * 2) >= d->vertex_count) FAIL("draw %u index %u out of range", i, k);
+            if (rd16(p + k * 2) >= d->vertex_count) FAIL("draw %" PRIu32 " index %" PRIu32 " out of range", i, k);
     }
     if (!table(c, "SHAP", 24, &b)) return false;
     a->shape_count = b.count;
@@ -204,7 +205,7 @@ static bool parse_shapes(swf_assets *a, ctx *c)
         s->first_draw = rd32(r + 16);
         s->draw_count = rd32(r + 20);
         if (s->first_draw > a->draw_count || s->draw_count > a->draw_count - s->first_draw)
-            FAIL("shape %u draw range out of bounds", i);
+            FAIL("shape %" PRIu32 " draw range out of bounds", i);
     }
     if (!table(c, "MRPF", 8, &b)) return false;
     a->morph_frame_count = b.count;
@@ -214,7 +215,7 @@ static bool parse_shapes(swf_assets *a, ctx *c)
         const uint8_t *r = b.p + i * 8;
         a->morph_frames[i].ratio = rd16(r);
         a->morph_frames[i].shape = rd32(r + 4);
-        if (a->morph_frames[i].shape >= a->shape_count) FAIL("morph frame %u has bad shape", i);
+        if (a->morph_frames[i].shape >= a->shape_count) FAIL("morph frame %" PRIu32 " has bad shape", i);
     }
     if (!table(c, "MRPH", 8, &b)) return false;
     a->morph_count = b.count;
@@ -226,7 +227,7 @@ static bool parse_shapes(swf_assets *a, ctx *c)
         m->frame_count = rd32(b.p + i * 8 + 4);
         if (m->frame_count == 0 || m->first_frame > a->morph_frame_count ||
             m->frame_count > a->morph_frame_count - m->first_frame)
-            FAIL("morph %u frame range out of bounds", i);
+            FAIL("morph %" PRIu32 " frame range out of bounds", i);
     }
     return true;
 }
@@ -238,7 +239,7 @@ static bool check_commands(const swf_assets *a, ctx *c, uint32_t from, uint32_t 
 {
     const uint8_t *p = a->cmds;
     uint32_t i = from;
-#define NEED(n) do { if (to - i < (uint32_t)(n)) FAIL("truncated command at %u", i); } while (0)
+#define NEED(n) do { if (to - i < (uint32_t)(n)) FAIL("truncated command at %" PRIu32, i); } while (0)
     while (i < to) {
         uint8_t op = p[i++];
         switch (op) {
@@ -261,7 +262,7 @@ static bool check_commands(const swf_assets *a, ctx *c, uint32_t from, uint32_t 
                 NEED(6);
                 uint32_t first = rd32(p + i), n = rd16(p + i + 4);
                 if (first > a->clip_action_count || n > a->clip_action_count - first)
-                    FAIL("clip action range out of bounds at %u", i);
+                    FAIL("clip action range out of bounds at %" PRIu32, i);
                 i += 6;
             }
             if (f & SWF_PLACE_BLEND) { NEED(1); i += 1; }
@@ -272,12 +273,12 @@ static bool check_commands(const swf_assets *a, ctx *c, uint32_t from, uint32_t 
         case SWF_CMD_REMOVE: NEED(2); i += 2; break;
         case SWF_CMD_ACTION:
             NEED(4);
-            if (rd32(p + i) >= a->script_count) FAIL("action script out of range at %u", i);
+            if (rd32(p + i) >= a->script_count) FAIL("action script out of range at %" PRIu32, i);
             i += 4;
             break;
         case SWF_CMD_START_SOUND: NEED(16); i += 16; break;
         case SWF_CMD_STREAM_BLOCK: NEED(4); i += 4; break;
-        default: FAIL("unknown command %u at %u", op, i - 1);
+        default: FAIL("unknown command %u at %" PRIu32, (unsigned)op, i - 1);
         }
     }
 #undef NEED
@@ -313,16 +314,16 @@ static bool parse_timelines(swf_assets *a, ctx *c)
         s->label_count = rd32(r + 12);
         s->stream = rd32(r + 16);
         if (s->frame_count == 0 || ft > frames.count || s->frame_count >= frames.count - ft)
-            FAIL("sprite %u frame table out of bounds", i);
+            FAIL("sprite %" PRIu32 " frame table out of bounds", i);
         if (lf > a->label_count || s->label_count > a->label_count - lf)
-            FAIL("sprite %u labels out of bounds", i);
-        if (s->stream != SWF_NONE && s->stream >= a->sound_count) FAIL("sprite %u stream out of range", i);
+            FAIL("sprite %" PRIu32 " labels out of bounds", i);
+        if (s->stream != SWF_NONE && s->stream >= a->sound_count) FAIL("sprite %" PRIu32 " stream out of range", i);
         /* FRMS is a u32 table in a 64-byte aligned block, so in-place use is aligned. */
         s->frame_offsets = (const uint32_t *)(frames.p + (size_t)ft * 4);
         s->labels = a->labels + lf;
         for (uint32_t f = 0; f < s->frame_count; f++) {
             uint32_t from = rd32(frames.p + (ft + f) * 4), to = rd32(frames.p + (ft + f + 1) * 4);
-            if (from > to || to > a->cmds_size) FAIL("sprite %u frame %u offsets invalid", i, f);
+            if (from > to || to > a->cmds_size) FAIL("sprite %" PRIu32 " frame %" PRIu32 " offsets invalid", i, f);
             if (!check_commands(a, c, from, to)) return false;
         }
     }
@@ -344,7 +345,7 @@ static bool parse_misc(swf_assets *a, ctx *c)
         a->clip_actions[i].events = rd32(r);
         a->clip_actions[i].key_code = r[4];
         a->clip_actions[i].script = rd32(r + 8);
-        if (!script_ok(a, a->clip_actions[i].script)) FAIL("clip action %u script out of range", i);
+        if (!script_ok(a, a->clip_actions[i].script)) FAIL("clip action %" PRIu32 " script out of range", i);
     }
 
     if (!table(c, "SOND", 24, &b)) return false;
@@ -362,7 +363,7 @@ static bool parse_misc(swf_assets *a, ctx *c)
         s->data_size = rd32(r + 16);
         if (s->format < SWF_SOUND_PCM16 || s->format > SWF_SOUND_MP3 || s->channels < 1 ||
             s->channels > 2 || s->rate == 0 || s->rate > 48000)
-            FAIL("sound %u has bad format", i);
+            FAIL("sound %" PRIu32 " has bad format", i);
         if (!data_ref(c, rd32(r + 12), s->data_size, 16, &s->data)) return false;
     }
 
@@ -389,7 +390,7 @@ static bool parse_misc(swf_assets *a, ctx *c)
         a->button_actions[i].conditions = rd16(r);
         a->button_actions[i].key = rd16(r + 2);
         a->button_actions[i].script = rd32(r + 4);
-        if (!script_ok(a, a->button_actions[i].script)) FAIL("button action %u script out of range", i);
+        if (!script_ok(a, a->button_actions[i].script)) FAIL("button action %" PRIu32 " script out of range", i);
     }
     if (!table(c, "BTTN", 16, &b)) return false;
     a->button_count = b.count;
@@ -401,7 +402,7 @@ static bool parse_misc(swf_assets *a, ctx *c)
         uint16_t nr = rd16(r + 4);
         if (fr > a->button_record_count || nr > a->button_record_count - fr ||
             fa > a->button_action_count || na > a->button_action_count - fa)
-            FAIL("button %u ranges out of bounds", i);
+            FAIL("button %" PRIu32 " ranges out of bounds", i);
         a->buttons[i] = (swf_button){a->button_records + fr, nr, rd16(r + 6), a->button_actions + fa, na};
     }
 
@@ -438,7 +439,7 @@ static bool parse_misc(swf_assets *a, ctx *c)
         a->glyphs[i].advance = (int16_t)rd16(r + 2);
         a->glyphs[i].shape = rd32(r + 4);
         if (a->glyphs[i].shape != SWF_NONE && a->glyphs[i].shape >= a->shape_count)
-            FAIL("glyph %u shape out of range", i);
+            FAIL("glyph %" PRIu32 " shape out of range", i);
     }
     if (!table(c, "FONT", 24, &b)) return false;
     a->font_count = b.count;
@@ -452,13 +453,13 @@ static bool parse_misc(swf_assets *a, ctx *c)
         f->flags = rd16(r + 4);
         f->glyph_count = rd16(r + 6);
         uint32_t fg = rd32(r + 8);
-        if (fg > a->glyph_count || f->glyph_count > a->glyph_count - fg) FAIL("font %u glyphs out of range", i);
+        if (fg > a->glyph_count || f->glyph_count > a->glyph_count - fg) FAIL("font %" PRIu32 " glyphs out of range", i);
         f->glyphs = a->glyphs + fg;
         f->ascent = rd16(r + 12);
         f->descent = rd16(r + 14);
         f->leading = (int16_t)rd16(r + 16);
         f->em = rd16(r + 18);
-        if (f->em == 0) FAIL("font %u has zero em size", i);
+        if (f->em == 0) FAIL("font %" PRIu32 " has zero em size", i);
     }
 
     if (!table(c, "EXPT", 8, &b)) return false;
@@ -477,7 +478,7 @@ static bool parse_misc(swf_assets *a, ctx *c)
     for (uint32_t i = 0; i < b.count; i++) {
         a->inits[i].sprite_id = rd16(b.p + i * 8);
         a->inits[i].script = rd32(b.p + i * 8 + 4);
-        if (!script_ok(a, a->inits[i].script)) FAIL("init action %u script out of range", i);
+        if (!script_ok(a, a->inits[i].script)) FAIL("init action %" PRIu32 " script out of range", i);
     }
 
     if (!find_block(c, "DFNT", &b)) return false;
@@ -520,9 +521,9 @@ static bool parse_chars(swf_assets *a, ctx *c)
         case SWF_CHAR_FONT: limit = a->font_count; break;
         case SWF_CHAR_BITMAP: limit = a->texture_count; break;
         case SWF_CHAR_SOUND: limit = a->sound_count; break;
-        default: FAIL("character %u has unknown kind %u", i, ch->kind);
+        default: FAIL("character %" PRIu32 " has unknown kind %u", i, ch->kind);
         }
-        if (ch->index >= limit) FAIL("character %u index %u out of range", i, ch->index);
+        if (ch->index >= limit) FAIL("character %" PRIu32 " index %" PRIu32 " out of range", i, ch->index);
     }
     return true;
 }

@@ -1,4 +1,4 @@
-/* Internal AVM1 runtime structures shared by runtime/src/avm1/*.c. */
+/* Internal AVM1 runtime structures shared by the runtime/src/avm1 sources. */
 #ifndef SWFRT_VM_INTERNAL_H
 #define SWFRT_VM_INTERNAL_H
 

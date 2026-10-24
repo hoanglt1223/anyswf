@@ -46,7 +46,7 @@ SWF_NORETURN void vm_abort(swf_vm *vm, const char *why)
 
 void vm_trace_warning(swf_vm *vm, const char *msg)
 {
-    char buf[512];
+    char buf[528]; /* "Warning: " plus a message of up to 511 characters */
     snprintf(buf, sizeof buf, "Warning: %s", msg);
     vm->trace(buf, vm->trace_user);
 }
@@ -159,7 +159,7 @@ swf_vm *swf_vm_new(swf_movie *movie, const swf_game_code *code)
 {
     if (!code || code->abi != SWF_CODE_ABI) {
         plat_log("avm1: compiled code ABI %u does not match the runtime (%u); recompile with this swf2c",
-                 code ? code->abi : 0, SWF_CODE_ABI);
+                 code ? (unsigned)code->abi : 0u, (unsigned)SWF_CODE_ABI);
         return NULL;
     }
     swf_vm *vm = calloc(1, sizeof *vm);

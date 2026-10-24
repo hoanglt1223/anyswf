@@ -142,7 +142,7 @@ int str_cmp(const swf_str *a, const swf_str *b)
 
 int64_t str_find(const swf_str *h, const swf_str *n, uint32_t from)
 {
-    if (n->len == 0) return from <= h->len ? from : -1;
+    if (n->len == 0) return from <= h->len ? (int64_t)from : -1;
     for (uint32_t i = from; i + n->len <= h->len; i++)
         if (memcmp(h->ch + i, n->ch, n->len * sizeof(uint16_t)) == 0) return i;
     return -1;

@@ -1,0 +1,309 @@
+/* PSP GE backend (sceGu). Asset vertex and texture formats are the GE's native ones:
+ * solid vertices are COLOR_8888|VERTEX_16BIT, textured ones TEXTURE_32BITF|VERTEX_16BIT,
+ * indices 16-bit, textures in GU_PSM_* order with optional swizzling.
+ *
+ * In transform mode the GE reads 16-bit positions as value / 32768, so the model matrix
+ * carries a 32768 * (1 << shift) twip scale. The 8888 framebuffer's alpha byte is the
+ * stencil buffer: the stencil test stays enabled with KEEP so normal draws never write
+ * it, and masks use INCR/DECR on it like the GL backend. */
+#include "render.h"
+
+#include <pspgu.h>
+#include <pspkernel.h>
+
+#include <string.h>
+
+/* Vertices built per frame (colour-transformed copies, rects, glyph quads). The GE reads
+ * them while the list runs, so they live until plat_frame_end syncs; the ring restarts
+ * at the next swf_render_begin. */
+#define RING_SIZE (1024 * 1024)
+static uint8_t __attribute__((aligned(64))) g_ring[RING_SIZE];
+static size_t g_ring_used;
+static bool g_ring_warned;
+static int g_stencil;
+
+typedef struct {
+    float u, v;
+    float x, y, z;
+} tex_vertex_f;
+
+typedef struct {
+    uint32_t color;
+    float x, y, z;
+} color_vertex_f;
+
+static void *ring_alloc(size_t size)
+{
+    size = (size + 15) & ~(size_t)15;
+    if (size > RING_SIZE - g_ring_used) {
+        if (!g_ring_warned) {
+            plat_log("render: per-frame vertex buffer full (%u bytes); draws dropped", (unsigned)RING_SIZE);
+            g_ring_warned = true;
+        }
+        return NULL;
+    }
+    void *p = g_ring + g_ring_used;
+    g_ring_used += size;
+    return p;
+}
+
+static void ring_flush(void *p, size_t size)
+{
+    sceKernelDcacheWritebackRange(p, (unsigned int)((size + 63) & ~(size_t)63));
+}
+
+static uint32_t abgr(const uint8_t c[4])
+{
+    return (uint32_t)c[0] | ((uint32_t)c[1] << 8) | ((uint32_t)c[2] << 16) | ((uint32_t)c[3] << 24);
+}
+
+static uint8_t unit_to_byte(float f)
+{
+    if (f <= 0) return 0;
+    if (f >= 1) return 255;
+    return (uint8_t)(f * 255.0f + 0.5f);
+}
+
+plat_result swf_render_init(const swf_assets *a)
+{
+    (void)a;
+    /* Texture, CLUT, vertex and index data were read into cached RAM; the GE reads memory
+     * directly. */
+    sceKernelDcacheWritebackAll();
+    g_ring_warned = false;
+    return PLAT_OK;
+}
+
+void swf_render_shutdown(void)
+{
+}
+
+static void set_blend(uint8_t blend)
+{
+    switch (blend) {
+    case SWF_BLEND_ADD: sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_FIX, 0, 0xFFFFFF); break;
+    /* As a source factor, GU_SRC_COLOR (0) selects the destination colour. */
+    case SWF_BLEND_MULTIPLY: sceGuBlendFunc(GU_ADD, GU_SRC_COLOR, GU_ONE_MINUS_SRC_ALPHA, 0, 0); break;
+    case SWF_BLEND_SCREEN: sceGuBlendFunc(GU_ADD, GU_FIX, GU_ONE_MINUS_SRC_COLOR, 0xFFFFFF, 0); break;
+    default: sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0); break;
+    }
+}
+
+static void apply_stencil(void)
+{
+    sceGuStencilFunc(GU_EQUAL, g_stencil, 0xFF);
+    sceGuStencilOp(GU_KEEP, GU_KEEP, GU_KEEP);
+}
+
+void swf_render_begin(const swf_assets *a)
+{
+    (void)a;
+    g_ring_used = 0;
+    g_stencil = 0;
+    ScePspFMatrix4 proj = {{2.0f / PLAT_SCREEN_W, 0, 0, 0},
+                           {0, -2.0f / PLAT_SCREEN_H, 0, 0},
+                           {0, 0, -1, 0},
+                           {-1, 1, 0, 1}};
+    ScePspFMatrix4 ident = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}};
+    sceGuSetMatrix(GU_PROJECTION, &proj);
+    sceGuSetMatrix(GU_VIEW, &ident);
+    sceGuSetMatrix(GU_MODEL, &ident);
+    sceGuDisable(GU_DEPTH_TEST);
+    sceGuDisable(GU_CULL_FACE);
+    sceGuEnable(GU_BLEND);
+    set_blend(0);
+    sceGuEnable(GU_STENCIL_TEST);
+    apply_stencil();
+    sceGuPixelMask(0);
+    sceGuTexScale(1.0f, 1.0f);
+    sceGuTexOffset(0.0f, 0.0f);
+    sceGuDisable(GU_TEXTURE_2D);
+}
+
+void swf_render_end(void)
+{
+    sceGuDisable(GU_TEXTURE_2D);
+    sceGuDisable(GU_STENCIL_TEST);
+    set_blend(0);
+}
+
+static void load_matrix(const swf_matrix *m, float unit)
+{
+    ScePspFMatrix4 g = {{m->a * unit, m->b * unit, 0, 0},
+                        {m->c * unit, m->d * unit, 0, 0},
+                        {0, 0, 1, 0},
+                        {m->tx, m->ty, 0, 1}};
+    sceGuSetMatrix(GU_MODEL, &g);
+}
+
+static void bind_texture(const swf_assets *a, uint32_t index, bool smooth)
+{
+    const swf_texture *t = &a->textures[index];
+    if (t->format == SWF_TEX_CLUT8) {
+        sceGuClutMode(GU_PSM_8888, 0, 0xFF, 0);
+        /* sceGuClutLoad counts blocks of 8 entries. */
+        sceGuClutLoad((t->clut_count + 7) / 8, t->clut);
+        sceGuTexMode(GU_PSM_T8, 0, 0, (t->flags & SWF_TEX_SWIZZLED) ? 1 : 0);
+    } else {
+        sceGuTexMode(t->format, 0, 0, (t->flags & SWF_TEX_SWIZZLED) ? 1 : 0);
+    }
+    sceGuTexImage(0, t->width, t->height, t->width, t->data);
+    int wrap = (t->flags & SWF_TEX_REPEAT) ? GU_REPEAT : GU_CLAMP;
+    sceGuTexWrap(wrap, wrap);
+    int f = smooth ? GU_LINEAR : GU_NEAREST;
+    sceGuTexFilter(f, f);
+    sceGuEnable(GU_TEXTURE_2D);
+}
+
+static const void *transformed_vertices(const swf_draw *d, const swf_cxform *cx)
+{
+    size_t size = (size_t)d->vertex_count * SWF_SOLID_VERTEX_SIZE;
+    uint8_t *out = ring_alloc(size);
+    if (!out) return NULL;
+    memcpy(out, d->vertices, size);
+    for (uint32_t i = 0; i < d->vertex_count; i++) {
+        uint8_t *v = out + i * SWF_SOLID_VERTEX_SIZE;
+        uint8_t c[4];
+        swf_cxform_apply(cx, v, c);
+        memcpy(v, c, 4);
+    }
+    ring_flush(out, size);
+    return out;
+}
+
+void swf_render_shape(const swf_assets *a, uint32_t shape, const swf_matrix *m, const swf_cxform *cx,
+                      uint8_t blend, bool strokes)
+{
+    if (shape >= a->shape_count) return;
+    const swf_shape *s = &a->shapes[shape];
+    set_blend(blend);
+    bool plain = swf_cxform_is_identity_mul(cx) && !swf_cxform_has_add(cx);
+    for (uint32_t i = 0; i < s->draw_count; i++) {
+        const swf_draw *d = &a->draws[s->first_draw + i];
+        if (!strokes && (d->flags & SWF_DRAW_STROKE)) continue;
+        load_matrix(m, 32768.0f * (float)(1u << d->shift));
+        if (!d->textured) {
+            const void *v = plain ? d->vertices : transformed_vertices(d, cx);
+            if (!v) continue;
+            sceGuDisable(GU_TEXTURE_2D);
+            sceGuDrawArray(GU_TRIANGLES, GU_COLOR_8888 | GU_VERTEX_16BIT | GU_INDEX_16BIT | GU_TRANSFORM_3D,
+                           (int)d->index_count, d->indices, v);
+            continue;
+        }
+        bind_texture(a, d->texture, (d->flags & SWF_DRAW_SMOOTH) != 0);
+        const int vtype = GU_TEXTURE_32BITF | GU_VERTEX_16BIT | GU_INDEX_16BIT | GU_TRANSFORM_3D;
+        uint8_t mul[4] = {unit_to_byte(cx->mul[0]), unit_to_byte(cx->mul[1]), unit_to_byte(cx->mul[2]),
+                          unit_to_byte(cx->mul[3])};
+        sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
+        sceGuColor(abgr(mul));
+        sceGuDrawArray(GU_TRIANGLES, vtype, (int)d->index_count, d->indices, d->vertices);
+        if (swf_cxform_has_add(cx)) {
+            /* Additive colour-transform term as a second pass: TFX_BLEND with the
+             * environment and vertex colours both set to max(add, 0) yields that colour
+             * with the texel's alpha times the alpha multiplier. Negative add terms are
+             * not representable this way and are dropped. */
+            uint8_t add[4];
+            for (int k = 0; k < 3; k++) add[k] = cx->add[k] > 0 ? unit_to_byte(cx->add[k] / 255.0f) : 0;
+            add[3] = mul[3];
+            sceGuTexFunc(GU_TFX_BLEND, GU_TCC_RGBA);
+            sceGuTexEnvColor(abgr(add) & 0xFFFFFF);
+            sceGuColor(abgr(add));
+            sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_FIX, 0, 0xFFFFFF);
+            sceGuDrawArray(GU_TRIANGLES, vtype, (int)d->index_count, d->indices, d->vertices);
+            sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
+            set_blend(blend);
+        }
+        sceGuDisable(GU_TEXTURE_2D);
+    }
+}
+
+void swf_render_rect(const swf_matrix *m, const int32_t r[4], uint32_t rgba, const swf_cxform *cx)
+{
+    uint8_t in[4] = {(uint8_t)rgba, (uint8_t)(rgba >> 8), (uint8_t)(rgba >> 16), (uint8_t)(rgba >> 24)}, c[4];
+    swf_cxform_apply(cx, in, c);
+    color_vertex_f *v = ring_alloc(6 * sizeof *v);
+    if (!v) return;
+    uint32_t col = abgr(c);
+    float x0 = (float)r[0], y0 = (float)r[1], x1 = (float)r[2], y1 = (float)r[3];
+    const float xy[6][2] = {{x0, y0}, {x1, y0}, {x1, y1}, {x0, y0}, {x1, y1}, {x0, y1}};
+    for (int i = 0; i < 6; i++) v[i] = (color_vertex_f){col, xy[i][0], xy[i][1], 0};
+    ring_flush(v, 6 * sizeof *v);
+    load_matrix(m, 1.0f);
+    set_blend(0);
+    sceGuDisable(GU_TEXTURE_2D);
+    sceGuDrawArray(GU_TRIANGLES, GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_3D, 6, NULL, v);
+}
+
+void swf_render_glyph_quad(const swf_assets *a, const swf_matrix *m, const float src[4], const float dst[4],
+                           uint32_t rgba, const swf_cxform *cx)
+{
+    const swf_texture *t = &a->textures[a->device_font.texture];
+    uint8_t in[4] = {(uint8_t)rgba, (uint8_t)(rgba >> 8), (uint8_t)(rgba >> 16), (uint8_t)(rgba >> 24)}, c[4];
+    swf_cxform_apply(cx, in, c);
+    tex_vertex_f *v = ring_alloc(6 * sizeof *v);
+    if (!v) return;
+    float u0 = src[0] / t->width, v0 = src[1] / t->height;
+    float u1 = (src[0] + src[2]) / t->width, v1 = (src[1] + src[3]) / t->height;
+    float x0 = dst[0], y0 = dst[1], x1 = dst[0] + dst[2], y1 = dst[1] + dst[3];
+    const tex_vertex_f q[6] = {{u0, v0, x0, y0, 0}, {u1, v0, x1, y0, 0}, {u1, v1, x1, y1, 0},
+                               {u0, v0, x0, y0, 0}, {u1, v1, x1, y1, 0}, {u0, v1, x0, y1, 0}};
+    memcpy(v, q, sizeof q);
+    ring_flush(v, sizeof q);
+    load_matrix(m, 1.0f);
+    set_blend(0);
+    bind_texture(a, a->device_font.texture, false);
+    sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
+    sceGuColor(abgr(c));
+    sceGuDrawArray(GU_TRIANGLES, GU_TEXTURE_32BITF | GU_VERTEX_32BITF | GU_TRANSFORM_3D, 6, NULL, v);
+    sceGuDisable(GU_TEXTURE_2D);
+}
+
+/* Mask shapes only touch the stencil: the fixed blend keeps the destination colour. */
+static void mask_write(int op)
+{
+    sceGuStencilFunc(GU_EQUAL, g_stencil, 0xFF);
+    sceGuStencilOp(GU_KEEP, GU_KEEP, op);
+    sceGuBlendFunc(GU_ADD, GU_FIX, GU_FIX, 0, 0xFFFFFF);
+}
+
+void swf_render_mask_begin(void)
+{
+    mask_write(GU_INCR);
+}
+
+void swf_render_mask_end(void)
+{
+    g_stencil++;
+    apply_stencil();
+    set_blend(0);
+}
+
+void swf_render_mask_pop_begin(void)
+{
+    mask_write(GU_DECR);
+}
+
+void swf_render_mask_pop_end(void)
+{
+    g_stencil--;
+    apply_stencil();
+    set_blend(0);
+}
+
+/* The GE has render-to-texture, but the framebuffer alpha byte is the stencil, so a
+ * layer could not carry coverage; blended objects use per-shape GE blending instead. */
+bool swf_render_layer_begin(void)
+{
+    return false;
+}
+
+void swf_render_layer_end(uint8_t blend)
+{
+    (void)blend;
+}
+
+bool swf_render_read_rgb(uint8_t *rgb)
+{
+    (void)rgb;
+    return false;
+}

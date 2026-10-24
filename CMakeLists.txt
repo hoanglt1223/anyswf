@@ -28,11 +28,8 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/anyswf-game.cmake)
 
 add_subdirectory(platform)
 add_subdirectory(apps/hello)
-# The PSP renderer (runtime/src/render/ge.c) lands with the GE renderer phase.
-if(NOT PSP)
-    add_subdirectory(runtime)
-    add_subdirectory(apps/player)
-endif()
+add_subdirectory(runtime)
+add_subdirectory(apps/player)
 
 if(NOT PSP)
     include(CTest)
