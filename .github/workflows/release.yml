@@ -1,0 +1,106 @@
+name: release
+
+# Pushing a tag such as v0.1.0 builds swf2c and anyswf-player for Windows, Linux and
+# macOS plus the PSP EBOOTs, and publishes them on a GitHub Release. Compiled games are
+# built from the release's source archive with cmake/anyswf-game.cmake.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  pc:
+    strategy:
+      matrix:
+        include:
+          - os: windows-2022
+            name: windows-x64
+            exe: .exe
+            player: out/pc/apps/player/Release/anyswf-player.exe
+          - os: ubuntu-24.04
+            name: linux-x64
+            exe: ""
+            player: out/pc/apps/player/anyswf-player
+          - os: macos-14
+            name: macos-arm64
+            exe: ""
+            player: out/pc/apps/player/anyswf-player
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install SDL3 build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build pkg-config \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev \
+            libxss-dev libxtst-dev libxkbcommon-dev libgl1-mesa-dev libegl1-mesa-dev \
+            libasound2-dev libpulse-dev libdbus-1-dev libudev-dev \
+            libwayland-dev wayland-protocols libdecor-0-dev
+      # rust-toolchain.toml pins the exact toolchain; rustup installs it on first use.
+      - run: cargo test --locked --manifest-path swf2c/Cargo.toml
+      - run: cargo build --release --locked --manifest-path swf2c/Cargo.toml
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: cmake -S . -B out/pc -G "Visual Studio 17 2022" -A x64
+      - name: Configure
+        if: runner.os != 'Windows'
+        run: cmake -S . -B out/pc -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build out/pc --config Release --parallel
+      - run: ctest --test-dir out/pc -C Release --output-on-failure
+      - name: Package
+        shell: bash
+        run: |
+          dir="anyswf-${{ github.ref_name }}-${{ matrix.name }}"
+          mkdir -p "$dir"
+          cp "swf2c/target/release/swf2c${{ matrix.exe }}" "${{ matrix.player }}" LICENSE THIRD_PARTY.md README.md "$dir/"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "$dir.zip" "$dir" > /dev/null
+          else
+            zip -qr "$dir.zip" "$dir"
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pc-${{ matrix.name }}
+          path: anyswf-*.zip
+          if-no-files-found: error
+
+  psp:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The pspdev image is Alpine (musl), where JavaScript actions cannot run,
+      # so the container is driven from the host through the same script as local builds.
+      - run: bash scripts/psp-build.sh Release
+      - name: Package
+        run: |
+          mkdir -p dist/PSP/GAME/AnySWFPlayer dist/PSP/GAME/AnySWFHello
+          cp out/psp/apps/player/EBOOT.PBP dist/PSP/GAME/AnySWFPlayer/
+          cp out/psp/apps/hello/EBOOT.PBP dist/PSP/GAME/AnySWFHello/
+          cp LICENSE dist/PSP/GAME/AnySWFPlayer/LICENSE.txt
+          (cd dist && zip -qr "../anyswf-${{ github.ref_name }}-psp.zip" PSP)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: psp
+          path: anyswf-*-psp.zip
+          if-no-files-found: error
+
+  release:
+    needs: [pc, psp]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" artifacts/* \
+            --repo "${{ github.repository }}" \
+            --title "AnySWF ${{ github.ref_name }}" \
+            --generate-notes
