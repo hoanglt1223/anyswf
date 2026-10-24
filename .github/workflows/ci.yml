@@ -79,3 +79,24 @@ jobs:
           name: test-corpus
           path: out/corpus
           if-no-files-found: error
+
+  avm1:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install SDL3 build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build pkg-config xvfb \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev \
+            libxss-dev libxtst-dev libxkbcommon-dev libgl1-mesa-dev libegl1-mesa-dev \
+            libasound2-dev libpulse-dev libdbus-1-dev libudev-dev \
+            libwayland-dev wayland-protocols libdecor-0-dev
+      - run: cargo build --release --locked --manifest-path swf2c/Cargo.toml
+      - run: bash tests/fetch-mtasc.sh
+      - run: bash tests/build-corpus.sh out/corpus
+      - name: AVM1 conformance (self-authored corpus + Ruffle tests/ruffle-avm1)
+        run: >
+          xvfb-run -a python3 tests/avm1/run-avm1-tests.py --swf2c swf2c/target/release/swf2c
+          --out out/avm1 --corpus out/corpus --generator Ninja

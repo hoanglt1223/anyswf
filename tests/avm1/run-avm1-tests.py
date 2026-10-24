@@ -3,7 +3,7 @@ executable per test with CMake, runs it headless for the test's frame count and
 compares the trace output with the expected output (Flash Player's, for Ruffle tests).
 
     python tests/avm1/run-avm1-tests.py --swf2c <swf2c> --out out/avm1
-        [--corpus out/corpus] [--ruffle tests/ruffle-avm1] [--only NAME...]
+        [--corpus out/corpus] [--ruffle DIR (default tests/ruffle-avm1)] [--only NAME...]
         [--generator "Visual Studio 17 2022"] [--list-selection]
 
 Ruffle tests are selected statically (before running): the movie must be AVM1, have
@@ -141,7 +141,7 @@ def main():
     ap.add_argument("--swf2c", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--corpus")
-    ap.add_argument("--ruffle")
+    ap.add_argument("--ruffle", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ruffle-avm1"))
     ap.add_argument("--only", nargs="*")
     ap.add_argument("--generator")
     ap.add_argument("--config", default="Release")
