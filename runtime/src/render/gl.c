@@ -18,6 +18,72 @@ static int g_stencil;          /* current mask nesting level */
 static uint8_t *g_scratch;     /* per-vertex colours after a colour transform */
 static size_t g_scratch_cap;
 
+/* Blend layers need framebuffer objects (GL 3.0 / ARB_framebuffer_object) and
+ * glBlendFuncSeparate (GL 1.4), both loaded at init; without them layers are off. */
+static PFNGLBLENDFUNCSEPARATEPROC p_glBlendFuncSeparate;
+static PFNGLGENFRAMEBUFFERSPROC p_glGenFramebuffers;
+static PFNGLDELETEFRAMEBUFFERSPROC p_glDeleteFramebuffers;
+static PFNGLBINDFRAMEBUFFERPROC p_glBindFramebuffer;
+static PFNGLFRAMEBUFFERTEXTURE2DPROC p_glFramebufferTexture2D;
+static PFNGLCHECKFRAMEBUFFERSTATUSPROC p_glCheckFramebufferStatus;
+static PFNGLGENRENDERBUFFERSPROC p_glGenRenderbuffers;
+static PFNGLDELETERENDERBUFFERSPROC p_glDeleteRenderbuffers;
+static PFNGLBINDRENDERBUFFERPROC p_glBindRenderbuffer;
+static PFNGLRENDERBUFFERSTORAGEPROC p_glRenderbufferStorage;
+static PFNGLFRAMEBUFFERRENDERBUFFERPROC p_glFramebufferRenderbuffer;
+static bool g_layers_ok;
+
+#define MAX_LAYERS 4
+typedef struct {
+    GLuint fbo, tex, rb;
+    GLint w, h;
+    int saved_stencil;
+} gl_layer;
+static gl_layer g_layers[MAX_LAYERS];
+static int g_layer_depth;
+static GLint g_viewport[4]; /* viewport of the window framebuffer, captured per frame */
+
+static void load_gl_procs(void)
+{
+#define LOAD(name, T) (p_##name = (T)SDL_GL_GetProcAddress(#name)) != NULL
+    g_layers_ok = LOAD(glBlendFuncSeparate, PFNGLBLENDFUNCSEPARATEPROC) &&
+                  LOAD(glGenFramebuffers, PFNGLGENFRAMEBUFFERSPROC) &&
+                  LOAD(glDeleteFramebuffers, PFNGLDELETEFRAMEBUFFERSPROC) &&
+                  LOAD(glBindFramebuffer, PFNGLBINDFRAMEBUFFERPROC) &&
+                  LOAD(glFramebufferTexture2D, PFNGLFRAMEBUFFERTEXTURE2DPROC) &&
+                  LOAD(glCheckFramebufferStatus, PFNGLCHECKFRAMEBUFFERSTATUSPROC) &&
+                  LOAD(glGenRenderbuffers, PFNGLGENRENDERBUFFERSPROC) &&
+                  LOAD(glDeleteRenderbuffers, PFNGLDELETERENDERBUFFERSPROC) &&
+                  LOAD(glBindRenderbuffer, PFNGLBINDRENDERBUFFERPROC) &&
+                  LOAD(glRenderbufferStorage, PFNGLRENDERBUFFERSTORAGEPROC) &&
+                  LOAD(glFramebufferRenderbuffer, PFNGLFRAMEBUFFERRENDERBUFFERPROC);
+#undef LOAD
+    if (!g_layers_ok) plat_log("render: no framebuffer objects; blend modes are applied per shape");
+}
+
+/* Colour uses (src, dst); alpha always accumulates coverage, so a layer holds
+ * premultiplied colour with correct alpha. */
+static void blend_func(GLenum src, GLenum dst)
+{
+    if (p_glBlendFuncSeparate) {
+        p_glBlendFuncSeparate(src, dst, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    } else {
+        glBlendFunc(src, dst);
+    }
+}
+
+static void free_layers(void)
+{
+    for (int i = 0; i < MAX_LAYERS; i++) {
+        gl_layer *l = &g_layers[i];
+        if (l->fbo) p_glDeleteFramebuffers(1, &l->fbo);
+        if (l->rb) p_glDeleteRenderbuffers(1, &l->rb);
+        if (l->tex) glDeleteTextures(1, &l->tex);
+        memset(l, 0, sizeof *l);
+    }
+    g_layer_depth = 0;
+}
+
 static void expand_texels(const swf_texture *t, const uint8_t *lin, uint8_t *rgba)
 {
     uint32_t n = (uint32_t)t->width * t->height;
@@ -73,6 +139,7 @@ static uint8_t *unswizzle(const uint8_t *src, uint32_t width_bytes, uint32_t hei
 plat_result swf_render_init(const swf_assets *a)
 {
     swf_render_shutdown();
+    load_gl_procs();
     g_tex_count = a->texture_count;
     g_tex = calloc(g_tex_count ? g_tex_count : 1, sizeof *g_tex);
     if (!g_tex) return PLAT_ERR_NO_MEMORY;
@@ -117,6 +184,7 @@ void swf_render_shutdown(void)
     free(g_tex);
     g_tex = NULL;
     g_tex_count = 0;
+    if (g_layers_ok) free_layers();
     free(g_scratch);
     g_scratch = NULL;
     g_scratch_cap = 0;
@@ -133,11 +201,13 @@ void swf_render_begin(const swf_assets *a)
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    blend_func(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDisable(GL_STENCIL_TEST);
     glStencilMask(0xFF);
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
     g_stencil = 0;
+    g_layer_depth = 0;
+    glGetIntegerv(GL_VIEWPORT, g_viewport);
 }
 
 void swf_render_end(void)
@@ -152,10 +222,10 @@ void swf_render_end(void)
 static void set_blend(uint8_t blend)
 {
     switch (blend) {
-    case SWF_BLEND_ADD: glBlendFunc(GL_SRC_ALPHA, GL_ONE); break;
-    case SWF_BLEND_MULTIPLY: glBlendFunc(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA); break;
-    case SWF_BLEND_SCREEN: glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_COLOR); break;
-    default: glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); break;
+    case SWF_BLEND_ADD: blend_func(GL_SRC_ALPHA, GL_ONE); break;
+    case SWF_BLEND_MULTIPLY: blend_func(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA); break;
+    case SWF_BLEND_SCREEN: blend_func(GL_ONE, GL_ONE_MINUS_SRC_COLOR); break;
+    default: blend_func(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); break;
     }
 }
 
@@ -218,7 +288,11 @@ void swf_render_shape(const swf_assets *a, uint32_t shape, const swf_matrix *m, 
             /* Additive colour-transform term: a second pass adds max(add, 0) weighted by
              * the texel's coverage, the same two-pass scheme the GE uses. Negative add
              * terms are not representable this way and are dropped. */
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+            if (p_glBlendFuncSeparate) {
+                p_glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE, GL_ZERO, GL_ONE);
+            } else {
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+            }
             glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
             glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_REPLACE);
             glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB, GL_PRIMARY_COLOR);
@@ -313,6 +387,107 @@ void swf_render_mask_pop_end(void)
     } else {
         glStencilFunc(GL_EQUAL, g_stencil, 0xFF);
     }
+}
+
+static void apply_stencil_state(void)
+{
+    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+    if (g_stencil == 0) {
+        glDisable(GL_STENCIL_TEST);
+    } else {
+        glEnable(GL_STENCIL_TEST);
+        glStencilFunc(GL_EQUAL, g_stencil, 0xFF);
+    }
+}
+
+static bool layer_alloc(gl_layer *l, GLint w, GLint h)
+{
+    if (l->fbo && l->w == w && l->h == h) return true;
+    if (!l->fbo) {
+        p_glGenFramebuffers(1, &l->fbo);
+        p_glGenRenderbuffers(1, &l->rb);
+        glGenTextures(1, &l->tex);
+    }
+    glBindTexture(GL_TEXTURE_2D, l->tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    p_glBindRenderbuffer(GL_RENDERBUFFER, l->rb);
+    p_glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h);
+    p_glBindRenderbuffer(GL_RENDERBUFFER, 0);
+    p_glBindFramebuffer(GL_FRAMEBUFFER, l->fbo);
+    p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, l->tex, 0);
+    p_glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, l->rb);
+    bool ok = p_glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    l->w = ok ? w : 0;
+    l->h = ok ? h : 0;
+    return ok;
+}
+
+static void bind_target(int depth)
+{
+    if (depth == 0) {
+        p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(g_viewport[0], g_viewport[1], g_viewport[2], g_viewport[3]);
+    } else {
+        const gl_layer *l = &g_layers[depth - 1];
+        p_glBindFramebuffer(GL_FRAMEBUFFER, l->fbo);
+        glViewport(0, 0, l->w, l->h);
+    }
+}
+
+bool swf_render_layer_begin(void)
+{
+    if (!g_layers_ok || g_layer_depth == MAX_LAYERS || g_viewport[2] <= 0 || g_viewport[3] <= 0) return false;
+    gl_layer *l = &g_layers[g_layer_depth];
+    if (!layer_alloc(l, g_viewport[2], g_viewport[3])) {
+        plat_log("render: blend layer framebuffer incomplete; blend modes are applied per shape");
+        g_layers_ok = false;
+        bind_target(g_layer_depth);
+        return false;
+    }
+    l->saved_stencil = g_stencil;
+    g_layer_depth++;
+    bind_target(g_layer_depth);
+    glClearColor(0, 0, 0, 0);
+    glClearStencil(0);
+    glStencilMask(0xFF);
+    glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    g_stencil = 0;
+    apply_stencil_state();
+    return true;
+}
+
+void swf_render_layer_end(uint8_t blend)
+{
+    if (g_layer_depth == 0) return;
+    gl_layer *l = &g_layers[--g_layer_depth];
+    bind_target(g_layer_depth);
+    g_stencil = l->saved_stencil;
+    apply_stencil_state();
+    /* The layer is premultiplied, so each mode uses its premultiplied form. */
+    switch (blend) {
+    case SWF_BLEND_ADD: blend_func(GL_ONE, GL_ONE); break;
+    case SWF_BLEND_MULTIPLY: blend_func(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA); break;
+    case SWF_BLEND_SCREEN: blend_func(GL_ONE, GL_ONE_MINUS_SRC_COLOR); break;
+    default: blend_func(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); break;
+    }
+    glLoadIdentity();
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, l->tex);
+    glColor4f(1, 1, 1, 1);
+    /* Texture rows start at the bottom of the viewport; the projection puts y = 0 at the top. */
+    glBegin(GL_QUADS);
+    glTexCoord2f(0, 1); glVertex2f(0, 0);
+    glTexCoord2f(1, 1); glVertex2f((float)PLAT_SCREEN_W, 0);
+    glTexCoord2f(1, 0); glVertex2f((float)PLAT_SCREEN_W, (float)PLAT_SCREEN_H);
+    glTexCoord2f(0, 0); glVertex2f(0, (float)PLAT_SCREEN_H);
+    glEnd();
+    glDisable(GL_TEXTURE_2D);
+    set_blend(0);
 }
 
 bool swf_render_read_rgb(uint8_t *rgb)

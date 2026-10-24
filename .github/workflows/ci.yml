@@ -39,7 +39,7 @@ jobs:
       - name: Hello smoke test (headless, Mesa software GL)
         run: xvfb-run -a out/linux/apps/hello/hello --smoke
       - name: Render tests against Ruffle references (headless, Mesa software GL)
-        run: xvfb-run -a bash tests/render/run.sh out/linux/apps/player/anyswf-player 2
+        run: xvfb-run -a bash tests/render/run.sh out/linux/apps/player/anyswf-player
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:

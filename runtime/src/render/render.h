@@ -32,6 +32,14 @@ void swf_render_mask_end(void);
 void swf_render_mask_pop_begin(void);
 void swf_render_mask_pop_end(void);
 
+/* Blend layers: a display object with a blend mode is drawn into an offscreen layer
+ * (cleared to transparent, premultiplied alpha), which layer_end composites onto the
+ * previous target with `blend`. layer_begin returns false when no layer is available
+ * (backend without render targets, or nesting too deep); the caller then draws the
+ * object directly, passing the blend mode to each swf_render_shape. */
+bool swf_render_layer_begin(void);
+void swf_render_layer_end(uint8_t blend);
+
 /* Reads back the frame being drawn as RGB (480x272, top row first). False if unsupported. */
 bool swf_render_read_rgb(uint8_t *rgb);
 

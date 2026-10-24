@@ -114,8 +114,18 @@ static void render_children(swf_movie *m, const swf_dobj *first, const swf_matri
         }
         if (!c->visible && !as_mask) continue;
         swf_cxform cc = swf_cxform_mul(wcx, &c->cxform);
-        uint8_t b = c->blend > 1 ? c->blend : blend;
-        render_obj(m, c, &cm, &cc, b, as_mask);
+        uint8_t cb = c->blend;
+        if (cb != SWF_BLEND_NORMAL && cb != 1 && cb != SWF_BLEND_LAYER && cb != SWF_BLEND_MULTIPLY &&
+            cb != SWF_BLEND_SCREEN && cb != SWF_BLEND_ADD) {
+            swf_warn_once(m, SWF_WARN_BLEND, "render: blend mode %u is drawn as normal", (unsigned)cb);
+            cb = SWF_BLEND_NORMAL;
+        }
+        if (cb > 1 && !as_mask && swf_render_layer_begin()) {
+            render_obj(m, c, &cm, &cc, SWF_BLEND_NORMAL, false);
+            swf_render_layer_end(cb);
+            continue;
+        }
+        render_obj(m, c, &cm, &cc, cb > 1 ? cb : blend, as_mask);
     }
     while (n > 0) {
         n--;
