@@ -35,6 +35,7 @@ plat_result plat__full_path(plat_root root, const char *rel, char *buf, size_t b
 /* Backend hooks. */
 plat_result plat__files_init(const char *app_id);   /* resolves roots, creates the USER dir */
 void plat__files_shutdown(void);
+plat_result plat__files_set_user_dir(const char *dir); /* PC backend only */
 const char *plat__root_dir(plat_root root);         /* ends with '/', NULL before init */
 plat_result plat__replace_file(const char *from_full, const char *to_full);
 plat_result plat__remove_full(const char *full);

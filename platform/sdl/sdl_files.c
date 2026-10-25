@@ -32,6 +32,24 @@ plat_result plat__files_init(const char *app_id)
     return PLAT_OK;
 }
 
+plat_result plat__files_set_user_dir(const char *dir)
+{
+    size_t n = SDL_strlen(dir);
+    if (n == 0 || n + 2 > PLAT_PATH_MAX * 2) return PLAT_ERR_INVALID;
+    if (!SDL_CreateDirectory(dir)) {
+        plat_log("plat: cannot create %s: %s", dir, SDL_GetError());
+        return PLAT_ERR_IO;
+    }
+    char *copy = SDL_malloc(n + 2);
+    if (!copy) return PLAT_ERR_NO_MEMORY;
+    SDL_memcpy(copy, dir, n);
+    copy[n] = dir[n - 1] == '/' || dir[n - 1] == '\\' ? 0 : '/';
+    copy[n + 1] = 0;
+    SDL_free(user_dir);
+    user_dir = copy;
+    return PLAT_OK;
+}
+
 void plat__files_shutdown(void)
 {
     SDL_free(user_dir);

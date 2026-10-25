@@ -113,7 +113,11 @@ plat_result plat_init(const plat_config *cfg)
         return PLAT_ERR_INVALID;
 
     plat_result r = plat__files_init(cfg->app_id);
-    if (r != PLAT_OK) return r;
+    if (r == PLAT_OK && cfg->user_dir) r = plat__files_set_user_dir(cfg->user_dir);
+    if (r != PLAT_OK) {
+        plat__files_shutdown();
+        return r;
+    }
     screen_w = sw;
     screen_h = sh;
 
@@ -371,6 +375,17 @@ void plat_input_get(plat_input *out)
 uint64_t plat_time_us(void)
 {
     return SDL_GetTicksNS() / 1000u;
+}
+
+plat_result plat_wall_clock(int64_t *unix_ms, int32_t *utc_offset_min)
+{
+    if (!unix_ms || !utc_offset_min) return PLAT_ERR_INVALID;
+    SDL_Time now;
+    SDL_DateTime dt;
+    if (!SDL_GetCurrentTime(&now)) return PLAT_ERR_BACKEND;
+    *unix_ms = (int64_t)(now / 1000000);
+    *utc_offset_min = SDL_TimeToDateTime(now, &dt, true) ? dt.utc_offset / 60 : 0;
+    return PLAT_OK;
 }
 
 void plat_log(const char *fmt, ...)

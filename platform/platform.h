@@ -60,6 +60,7 @@ typedef struct plat_config {
      * (always on Android). Pressing one sets its bit in plat_input.keys. */
     const uint8_t *touch_keys;
     int touch_key_count;  /* at most PLAT_TOUCH_KEYS_MAX */
+    const char *user_dir; /* PC only: use this directory as the USER root (tests); NULL = pref path */
 } plat_config;
 
 #define PLAT_TOUCH_KEYS_MAX 12
@@ -170,6 +171,10 @@ plat_result plat_mkdir(plat_root root, const char *rel);   /* OK if it already e
 
 /* Monotonic microseconds since an arbitrary start point. */
 uint64_t plat_time_us(void);
+
+/* Wall clock: milliseconds since 1970-01-01 UTC, and the local time zone's offset from
+ * UTC in minutes (east positive, daylight saving included). */
+plat_result plat_wall_clock(int64_t *unix_ms, int32_t *utc_offset_min);
 
 void plat_log(const char *fmt, ...)
 #if defined(__GNUC__)

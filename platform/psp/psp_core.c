@@ -5,6 +5,8 @@
 #include <pspgu.h>
 #include <pspkernel.h>
 #include <psppower.h>
+#include <psprtc.h>
+#include <psputility.h>
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -183,6 +185,20 @@ void plat_input_get(plat_input *out)
 uint64_t plat_time_us(void)
 {
     return (uint64_t)sceKernelGetSystemTimeWide();
+}
+
+plat_result plat_wall_clock(int64_t *unix_ms, int32_t *utc_offset_min)
+{
+    if (!unix_ms || !utc_offset_min) return PLAT_ERR_INVALID;
+    u64 tick;
+    if (sceRtcGetCurrentTick(&tick) < 0) return PLAT_ERR_BACKEND;
+    /* RTC ticks are microseconds since 0001-01-01 UTC. */
+    *unix_ms = (int64_t)((tick - 62135596800000000ULL) / 1000ULL);
+    int tz = 0, dst = 0;
+    if (sceUtilityGetSystemParamInt(PSP_SYSTEMPARAM_ID_INT_TIMEZONE, &tz) < 0) tz = 0;
+    if (sceUtilityGetSystemParamInt(PSP_SYSTEMPARAM_ID_INT_DAYLIGHTSAVINGS, &dst) < 0) dst = 0;
+    *utc_offset_min = tz + (dst ? 60 : 0);
+    return PLAT_OK;
 }
 
 void plat_log(const char *fmt, ...)
