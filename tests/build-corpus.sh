@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Compiles every self-authored AS2 test in tests/swf-src/ into a SWF 8 movie
-# (480x272, 30 fps) with MTASC, next to its expected trace output.
+# (480x272, 30 fps) with MTASC, next to its expected trace output and its optional
+# <name>.toml (num_frames, input, runs, audio; see tests/avm1/run-avm1-tests.py).
+# A test whose first line is `// base: NAME` is compiled into the self-made movie
+# NAME.swf from tests/swf-src/make-base-swfs.py (symbols, sounds, buttons) instead of an
+# empty one. Shared classes live in tests/swf-src/lib/.
 #
 #   tests/build-corpus.sh [out-dir]     default: out/corpus
 #
@@ -34,6 +38,8 @@ fi
 
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"   # MTASC runs from the source dir below
+py="${PYTHON:-$(command -v python3 || command -v python)}"
+"$py" "$src/make-base-swfs.py" "$out/bases"
 count=0
 for as in "$src"/*.as; do
     name="$(basename "$as" .as)"
@@ -41,10 +47,17 @@ for as in "$src"/*.as; do
         echo "build-corpus: $name.as has no $name.expected" >&2
         exit 1
     fi
+    base="$(sed -n '1s#^// base: \([A-Za-z0-9_-]*\).*#\1#p' "$as")"
+    if [ -n "$base" ]; then
+        movie_args=(-swf "$out/bases/$base.swf" -out "$out/$name.swf")
+    else
+        movie_args=(-header 480:272:30 -swf "$out/$name.swf")
+    fi
     # MTASC resolves the main class through the classpath, so pass a path relative to it.
-    (cd "$src" && "$mtasc" "${std_args[@]}" -cp . -version 8 -header 480:272:30 -main \
-        -swf "$out/$name.swf" "$name.as")
+    (cd "$src" && "$mtasc" "${std_args[@]}" -cp . -cp lib -version 8 -main "${movie_args[@]}" "$name.as")
     cp "$src/$name.expected" "$out/$name.expected"
+    rm -f "$out/$name.toml"
+    if [ -f "$src/$name.toml" ]; then cp "$src/$name.toml" "$out/$name.toml"; fi
     count=$((count + 1))
 done
 echo "build-corpus: built $count SWF(s) into $out"

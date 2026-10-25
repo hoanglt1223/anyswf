@@ -1,0 +1,10 @@
+37 32 13 false
+down 39 ascii 0 right true
+up 39
+down 32 ascii 32 right false
+up 32
+down 37 ascii 0 right false
+down 38 ascii 0 right false
+up 37
+removed
+up held true

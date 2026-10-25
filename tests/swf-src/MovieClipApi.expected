@@ -1,0 +1,20 @@
+a 100 20 first 5
+40x40 1
+6
+movieclip e 10 1 0
+-1 51 -1 1
+d 300 20 7 true
+7 5 true
+110,30
+10,10
+true false false
+100 140 20 60
+true /renamed
+ctor c t
+attached true 40x40
+removed depth 0: true
+onLoad c
+a enterFrame 1
+a enterFrame 2
+after remove true
+d unload d

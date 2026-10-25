@@ -6,6 +6,11 @@ compares the trace output with the expected output (Flash Player's, for Ruffle t
         [--corpus out/corpus] [--ruffle DIR (default tests/ruffle-avm1)] [--only NAME...]
         [--generator "Visual Studio 17 2022"] [--list-selection]
 
+Self-authored tests may have <name>.toml next to the SWF: num_frames (default 1), input
+(the player's --input script), runs (default 1: later runs reuse the case's save
+directory, for SharedObject; the expected output is all runs' output in order) and
+audio = true (the run must mix non-silent sound, checked through --wav). Runs use TZ=UTC.
+
 Ruffle tests are selected statically (before running): the movie must be AVM1, have
 no clip-event or button scripts, and name none of the built-ins in UNSUPPORTED (they
 arrive with the runtime built-ins phase). The selection is printed with reasons.
@@ -19,6 +24,7 @@ import struct
 import subprocess
 import sys
 import tomllib
+import wave
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -94,6 +100,17 @@ def normalize(text):
     return lines
 
 
+def wav_has_sound(path):
+    try:
+        with wave.open(path, "rb") as w:
+            data = w.readframes(w.getnframes())
+    except (OSError, wave.Error, EOFError):
+        return False
+    peak = max((abs(int.from_bytes(data[i:i + 2], "little", signed=True)) for i in range(0, len(data) - 1, 2)),
+               default=0)
+    return peak > 1000
+
+
 def collect_cases(args):
     cases = []
     if args.corpus and os.path.isdir(args.corpus):
@@ -101,8 +118,15 @@ def collect_cases(args):
             if f.endswith(".swf"):
                 name = f[:-4]
                 exp = os.path.join(args.corpus, name + ".expected")
+                meta = {}
+                toml_path = os.path.join(args.corpus, name + ".toml")
+                if os.path.isfile(toml_path):
+                    with open(toml_path, "rb") as tf:
+                        meta = tomllib.load(tf)
                 cases.append({"name": "self_" + name, "swf": os.path.join(args.corpus, f), "expected": exp,
-                              "frames": 1, "kind": "self"})
+                              "frames": int(meta.get("num_frames", 1)), "kind": "self",
+                              "input": meta.get("input"), "runs": int(meta.get("runs", 1)),
+                              "audio": bool(meta.get("audio", False))})
     if args.ruffle and os.path.isdir(args.ruffle):
         for d in sorted(os.listdir(args.ruffle)):
             p = os.path.join(args.ruffle, d)
@@ -246,12 +270,26 @@ def main():
             err = [l for l in build_log.splitlines() if f"t_{name}" in l and "error" in l.lower()]
             results.append((c, False, "C compile failed: " + (err[0][-200:] if err else "see compile.log")))
             continue
+        save_dir = os.path.join(c["dir"], "save")
+        shutil.rmtree(save_dir, ignore_errors=True)
+        wav_path = os.path.join(c["dir"], "out.wav")
+        cmd = [exe, os.path.join(c["dir"], "assets.bin"), "--headless", "--frames", str(c["frames"]),
+               "--save-dir", save_dir]
+        if c.get("input"):
+            cmd += ["--input", c["input"]]
+        if c.get("audio"):
+            cmd += ["--wav", wav_path]
+        env = dict(os.environ, TZ="UTC")
+        got = []
         try:
-            r = run([exe, os.path.join(c["dir"], "assets.bin"), "--headless", "--frames", str(c["frames"])],
-                    timeout=args.timeout)
-            got = normalize(r.stdout)
+            for _ in range(c.get("runs", 1)):
+                r = run(cmd, timeout=args.timeout, env=env)
+                got += normalize(r.stdout)
         except subprocess.TimeoutExpired:
             results.append((c, False, "timeout"))
+            continue
+        if c.get("audio") and not wav_has_sound(wav_path):
+            results.append((c, False, "no sound in " + wav_path))
             continue
         with open(c["expected"], encoding="utf-8", errors="replace") as f:
             want = normalize(f.read())

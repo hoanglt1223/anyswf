@@ -1,0 +1,15 @@
+true false true
+0 1
+rollOver
+mouse down 60,60
+press 60,60
+mouse up
+release
+mouse down 60,60
+press 60,60
+dragOut
+dragOver
+dragOut
+mouse up
+releaseOutside
+rollOver

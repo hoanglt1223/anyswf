@@ -1,0 +1,2 @@
+num_frames = 16
+input = "3:right,5:none,7:circle,8:none,10:up+left,12:up,16:none"

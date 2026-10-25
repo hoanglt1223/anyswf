@@ -1,0 +1,11 @@
+number
+true
+method o arg
+tick 1
+tick 2
+timeout xy
+tick 3
+cleared
+method calls >= 3: true
+elapsed >= 900: true
+calls stopped: true

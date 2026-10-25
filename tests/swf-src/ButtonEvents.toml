@@ -1,0 +1,2 @@
+num_frames = 10
+input = "2:none@220/120,3:cross@220/120,4:none@220/120,5:circle@220/120,6:none@220/120,8:cross@220/120,9:none@220/120"

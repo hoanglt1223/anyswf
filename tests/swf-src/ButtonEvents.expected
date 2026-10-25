@@ -1,0 +1,7 @@
+object btn true -16383
+btn over
+btn press
+btn release
+btn release method
+btn key
+disabled
