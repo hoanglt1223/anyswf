@@ -60,4 +60,19 @@ for as in "$src"/*.as; do
     if [ -f "$src/$name.toml" ]; then cp "$src/$name.toml" "$out/$name.toml"; fi
     count=$((count + 1))
 done
+# Render cases with scripts (tests/render/as): no expected trace, compared as images.
+mkdir -p "$out/render"
+for as in "$root/tests/render/as"/*.as; do
+    [ -f "$as" ] || continue
+    name="$(basename "$as" .as)"
+    base="$(sed -n '1s#^// base: \([A-Za-z0-9_-]*\).*#\1#p' "$as")"
+    if [ -n "$base" ]; then
+        movie_args=(-swf "$out/bases/$base.swf" -out "$out/render/$name.swf")
+    else
+        movie_args=(-header 480:272:30 -swf "$out/render/$name.swf")
+    fi
+    (cd "$root/tests/render/as" && "$mtasc" "${std_args[@]}" -cp . -cp "$src/lib" -version 8 -main \
+        "${movie_args[@]}" "$name.as")
+    count=$((count + 1))
+done
 echo "build-corpus: built $count SWF(s) into $out"

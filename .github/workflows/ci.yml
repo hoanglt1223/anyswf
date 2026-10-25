@@ -39,7 +39,9 @@ jobs:
       - name: Hello smoke test (headless, Mesa software GL)
         run: xvfb-run -a out/linux/apps/hello/hello --smoke
       - name: Render tests against Ruffle references (headless, Mesa software GL)
-        run: xvfb-run -a bash tests/render/run.sh out/linux/apps/player/anyswf-player
+        run: |
+          bash tests/fetch-mtasc.sh
+          xvfb-run -a bash tests/render/run.sh out/linux/apps/player/anyswf-player
       - name: Export a test movie as a native Linux game and run it headless
         run: |
           out/cargo/release/anyswf build out/gen/g12_scaled_stage.swf --target linux \

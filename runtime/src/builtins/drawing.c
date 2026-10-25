@@ -337,6 +337,16 @@ static uint32_t gradient_color(const swf_fill_style *s, float x, float y)
     return s->stop_rgba[s->stops - 1];
 }
 
+static float gradient_step(const swf_fill_style *s)
+{
+    if (!s->gradient) return 0;
+    const swf_matrix *m = &s->inverse;
+    float norm = fmaxf(fmaxf(fabsf(m->a), fabsf(m->b)), fmaxf(fabsf(m->c), fabsf(m->d)));
+    if (!(norm > 0)) return 0;
+    float step = 2048.0f / norm;
+    return step < 40.0f ? 40.0f : step;
+}
+
 static bool mesh_room(swf_drawing *d, uint32_t nv, uint32_t ni, bool fill)
 {
     if (d->nv + nv > MAX_MESH_VERTICES) {
@@ -444,9 +454,25 @@ static void tessellate_fill(swf_drawing *d, const dpath *p)
         free(edges);
         return;
     }
+    float ymin = edges[0].y0, ymax = edges[0].y1;
     for (uint32_t i = 0; i < ne; i++) {
         ys[ny++] = edges[i].y0;
         ys[ny++] = edges[i].y1;
+        if (edges[i].y0 < ymin) ymin = edges[i].y0;
+        if (edges[i].y1 > ymax) ymax = edges[i].y1;
+    }
+    /* Gradients are shaded per vertex, so gradient fills get a grid fine enough for the
+     * colour to change smoothly: 1/16 of the gradient square per cell. */
+    float step = gradient_step(&p->style);
+    uint32_t extra = step > 0 ? (uint32_t)((ymax - ymin) / step) : 0;
+    if (extra > 64) extra = 64, step = (ymax - ymin) / 64;
+    if (extra) {
+        float *n = realloc(ys, (ny + extra + 1) * sizeof *n);
+        if (n) {
+            ys = n;
+            ycap = ny + extra + 1;
+            for (uint32_t k = 1; k <= extra; k++) ys[ny++] = ymin + step * (float)k;
+        }
     }
     if (ne <= MAX_INTERSECT_EDGES) {
         for (uint32_t i = 0; i < ne; i++) {
@@ -483,8 +509,15 @@ static void tessellate_fill(swf_drawing *d, const dpath *p)
         qsort(spans, ns, sizeof *spans, cmp_span);
         for (uint32_t i = 0; i + 1 < ns; i += 2) {
             const span *l = &spans[i], *r = &spans[i + 1];
-            const float q[8] = {l->xa, ya, r->xa, ya, r->xb, yb, l->xb, yb};
-            emit_quad(d, q, fs->gradient ? fs : NULL, fs->rgba, true);
+            float w = fmaxf(r->xa - l->xa, r->xb - l->xb);
+            uint32_t cols = step > 0 && w > step ? (uint32_t)ceilf(w / step) : 1;
+            if (cols > 64) cols = 64;
+            for (uint32_t c = 0; c < cols; c++) {
+                float t0 = (float)c / cols, t1 = (float)(c + 1) / cols;
+                const float q[8] = {l->xa + (r->xa - l->xa) * t0, ya, l->xa + (r->xa - l->xa) * t1, ya,
+                                    l->xb + (r->xb - l->xb) * t1, yb, l->xb + (r->xb - l->xb) * t0, yb};
+                emit_quad(d, q, fs->gradient ? fs : NULL, fs->rgba, true);
+            }
         }
     }
     free(spans);

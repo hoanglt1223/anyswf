@@ -140,3 +140,16 @@ phase = 3
 name = "ruffle_blend_screen"
 swf = "tests/ruffle/blend_modes_screen/test.swf"
 phase = 3
+
+# Scripted cases (tests/render/as): the runtime built-ins draw the frame.
+[[case]]
+name = "as_drawing_api"
+swf = "corpus:render/RenderDrawing"
+code = true
+phase = 5
+
+[[case]]
+name = "as_script_clips"
+swf = "corpus:render/RenderClips"
+code = true
+phase = 5

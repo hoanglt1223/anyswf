@@ -15,8 +15,10 @@ def load_cases(max_phase=None):
     return cases
 
 
-def swf_path(case, gen_dir):
+def swf_path(case, gen_dir, corpus_dir=None):
     swf = case["swf"]
     if swf.startswith("gen:"):
         return os.path.join(gen_dir, swf[4:] + ".swf")
+    if swf.startswith("corpus:"):
+        return os.path.join(corpus_dir or os.path.join(ROOT, "out", "corpus"), swf[7:] + ".swf")
     return os.path.join(ROOT, swf)

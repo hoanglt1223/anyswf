@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Builds swf2c, writes the generated test movies, and runs the render tests against the
-# committed Ruffle references.
+# Builds swf2c, writes the generated test movies, builds the AS2 corpus (scripted cases
+# need MTASC: tests/fetch-mtasc.sh), and runs the render tests against the committed
+# Ruffle references.
 #
 #   tests/render/run.sh <anyswf-player> [max-phase]
 #
@@ -25,5 +26,10 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$root/out/cargo}"
 (cd "$root/swf2c" && cargo build --release --locked && cargo run --release --locked --example gen_test_swfs -- "$root/out/gen")
 swf2c="$CARGO_TARGET_DIR/release/swf2c"
 [ -x "$swf2c" ] || swf2c="$swf2c.exe"
+# Scripted cases come from the AS2 corpus (MTASC; tests/fetch-mtasc.sh).
+bash "$root/tests/build-corpus.sh" "$root/out/corpus" >/dev/null
+gen_args=()
+if command -v ninja >/dev/null; then gen_args=(--generator Ninja); fi
 "$py" "$root/tests/render/run-render-tests.py" --swf2c "$swf2c" --player "$player" \
-    --gen-dir "$root/out/gen" --out "$root/out/render" "${phase_args[@]}"
+    --gen-dir "$root/out/gen" --corpus "$root/out/corpus" --out "$root/out/render" \
+    "${gen_args[@]}" "${phase_args[@]}"

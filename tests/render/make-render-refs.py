@@ -19,6 +19,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--exporter", required=True)
     ap.add_argument("--gen-dir", required=True)
+    ap.add_argument("--corpus", help="tests/build-corpus.sh output (for corpus: cases)")
     ap.add_argument("--only", nargs="*")
     args = ap.parse_args()
     args.exporter = os.path.abspath(args.exporter)
@@ -29,7 +30,7 @@ def main():
         if args.only and case["name"] not in args.only:
             continue
         out = os.path.join(ref_dir, case["name"] + ".png")
-        cmd = [args.exporter, "-s", "--width", "480", "--height", "272", swf_path(case, args.gen_dir), out]
+        cmd = [args.exporter, "-s", "--width", "480", "--height", "272", swf_path(case, args.gen_dir, args.corpus), out]
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
             print(f"FAIL {case['name']}: {r.stderr.strip()}")
