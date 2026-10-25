@@ -1,5 +1,5 @@
 /out/
-/tools/
+/tools/mtasc/
 /swf2c/target/
 # No SWF content is ever committed; the test corpus is built from tests/swf-src.
 *.swf

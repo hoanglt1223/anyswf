@@ -1,0 +1,12 @@
+title = "Render test: g04_linear_gradients"
+kind = "test-suite"
+source = "swf2c/examples/gen_test_swfs.rs"
+swf = "gen:g04_linear_gradients"
+swf_version = 8
+actionscript = "none"
+stage = "perfect"
+targets = ["pc"]
+evidence = "frame matches the Ruffle reference within the render-test thresholds (tests/render/run.sh); tests linear gradient fills."
+blockers = []
+unimplemented = []
+updated = 2026-10-25

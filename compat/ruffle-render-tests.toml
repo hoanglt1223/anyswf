@@ -1,0 +1,10 @@
+title = "Ruffle render tests (vendored selection)"
+kind = "test-suite"
+source = "https://github.com/ruffle-rs/ruffle/tree/master/tests/tests/swfs"
+swf = "tests/ruffle"
+stage = "playable"
+targets = ["pc"]
+evidence = "13 of 14 frames match Ruffle's within the render-test thresholds (tests/render/run.sh)"
+blockers = ["gradient_radial_same_ratios: radial gradient with equal stop ratios differs (known failure)"]
+unimplemented = []
+updated = 2026-10-25

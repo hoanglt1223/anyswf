@@ -1,0 +1,12 @@
+title = "Render test: g10_morph"
+kind = "test-suite"
+source = "swf2c/examples/gen_test_swfs.rs"
+swf = "gen:g10_morph"
+swf_version = 8
+actionscript = "none"
+stage = "perfect"
+targets = ["pc"]
+evidence = "frame matches the Ruffle reference within the render-test thresholds (tests/render/run.sh); tests a shape morph across frames."
+blockers = []
+unimplemented = []
+updated = 2026-10-25

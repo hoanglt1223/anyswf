@@ -1,0 +1,11 @@
+title = "Ruffle AVM1 tests (vendored selection)"
+kind = "test-suite"
+source = "https://github.com/ruffle-rs/ruffle/tree/master/tests/tests/swfs/avm1"
+swf = "tests/ruffle-avm1"
+actionscript = "AS2"
+stage = "in-game"
+targets = ["pc"]
+evidence = "164 of 199 movies print Flash Player's trace output exactly (tests/avm1/run-avm1-tests.py, 82.4%)"
+blockers = ["watch() callbacks, waitForFrame with fractional frames and a few coercion corners differ from Flash Player"]
+unimplemented = []
+updated = 2026-10-25

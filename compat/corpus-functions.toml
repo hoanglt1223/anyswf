@@ -1,0 +1,13 @@
+title = "AS2 corpus: Functions"
+kind = "test-suite"
+source = "tests/swf-src/Functions.as"
+swf = "tests/swf-src/Functions.as"
+swf_version = 8
+actionscript = "AS2"
+stage = "perfect"
+targets = ["pc", "psp-ppsspp"]
+evidence = "trace output equals Functions.expected on PC (tests/avm1/run-avm1-tests.py) and as an EBOOT under PPSSPP (tests/psp/run-psp-corpus.py); covers functions, closures, arguments and recursion"
+blockers = []
+unimplemented = []
+notes = "not yet run on PSP hardware"
+updated = 2026-10-25
