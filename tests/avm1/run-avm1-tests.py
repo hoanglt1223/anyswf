@@ -11,9 +11,9 @@ Self-authored tests may have <name>.toml next to the SWF: num_frames (default 1)
 directory, for SharedObject; the expected output is all runs' output in order) and
 audio = true (the run must mix non-silent sound, checked through --wav). Runs use TZ=UTC.
 
-Ruffle tests are selected statically (before running): the movie must be AVM1, have
-no clip-event or button scripts, and name none of the built-ins in UNSUPPORTED (they
-arrive with the runtime built-ins phase). The selection is printed with reasons.
+Ruffle tests are selected statically (before running): the movie must be AVM1, need no
+injected input (input.json) or network, and name none of the features in UNSUPPORTED.
+The selection is printed with reasons.
 """
 
 import argparse
@@ -30,32 +30,24 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 
 UNSUPPORTED = [
-    # display and drawing API beyond timeline navigation
-    "createEmptyMovieClip", "attachMovie", "duplicateMovieClip", "removeMovieClip", "createTextField",
-    "getBounds", "getRect", "hitTest", "localToGlobal", "globalToLocal", "swapDepths", "getNextHighestDepth",
-    "getInstanceAtDepth", "loadMovie", "unloadMovie", "beginFill", "beginGradientFill", "beginBitmapFill",
-    "lineStyle", "lineTo", "moveTo", "curveTo", "clear", "startDrag", "stopDrag", "attachBitmap", "setMask",
-    "getSWFVersion", "loadVariables", "useHandCursor", "_droptarget", "_xmouse", "_ymouse", "_url",
-    "_quality", "_highquality", "_focusrect", "_soundbuftime", "toggleHighQuality", "tabIndex", "tabEnabled",
-    "filters", "blendMode", "cacheAsBitmap", "scrollRect", "scale9Grid", "transform", "opaqueBackground",
-    "_lockroot", "menu", "focusEnabled", "trackAsMenu", "getTextSnapshot", "_alpha", "_width", "_height",
-    "_rotation", "_xscale", "_yscale", "_name",
-    # events
-    "onEnterFrame", "onLoad", "onUnload", "onPress", "onRelease", "onMouseDown", "onMouseUp", "onMouseMove",
-    "onKeyDown", "onKeyUp", "onData", "onRollOver", "onRollOut", "onSetFocus", "onKillFocus", "onChanged",
-    "onScroller", "addListener", "broadcastMessage", "AsBroadcaster",
-    # classes not in the core set
-    "TextField", "TextFormat", "Key", "Mouse", "Sound", "SharedObject", "Stage", "Date", "XML", "XMLNode",
-    "LoadVars", "LocalConnection", "NetConnection", "NetStream", "Camera", "Microphone", "Video", "Selection",
-    "Color", "System", "Accessibility", "ContextMenu", "ContextMenuItem", "PrintJob", "ExternalInterface",
-    "BitmapData", "BlurFilter", "GlowFilter", "DropShadowFilter", "BevelFilter", "ColorMatrixFilter",
-    "ConvolutionFilter", "DisplacementMapFilter", "GradientBevelFilter", "GradientGlowFilter", "Transform",
-    "ColorTransform", "Matrix", "Point", "Rectangle", "MovieClipLoader", "TextSnapshot", "FileReference",
-    "FileReferenceList", "Button", "CustomActions", "TextRenderer", "StyleSheet", "IME", "capabilities",
-    "security", "flash", "XMLSocket",
-    # timers, natives, host
-    "setInterval", "setTimeout", "clearInterval", "clearTimeout", "ASnative", "ASconstructor", "fscommand",
-    "getURL", "getVersion", "$version", "_level1", "_level2", "getTimer",
+    # display features the runtime does not have
+    "beginBitmapFill", "attachBitmap", "setMask", "loadMovie", "unloadMovie", "loadVariables", "useHandCursor",
+    "_url", "_quality", "_highquality", "_focusrect", "_soundbuftime", "toggleHighQuality", "tabIndex",
+    "tabEnabled", "filters", "blendMode", "cacheAsBitmap", "scrollRect", "scale9Grid", "transform",
+    "opaqueBackground", "_lockroot", "menu", "focusEnabled", "trackAsMenu", "getTextSnapshot", "hitArea",
+    "lineGradientStyle",
+    # events that need focus, loading or text input
+    "onData", "onSetFocus", "onKillFocus", "onChanged", "onScroller", "onMouseWheel",
+    # classes not in the runtime
+    "XML", "XMLNode", "LoadVars", "LocalConnection", "NetConnection", "NetStream", "Camera", "Microphone",
+    "Video", "Selection", "System", "Accessibility", "ContextMenu", "ContextMenuItem", "PrintJob",
+    "ExternalInterface", "BitmapData", "BlurFilter", "GlowFilter", "DropShadowFilter", "BevelFilter",
+    "ColorMatrixFilter", "ConvolutionFilter", "DisplacementMapFilter", "GradientBevelFilter",
+    "GradientGlowFilter", "Transform", "ColorTransform", "Matrix", "Point", "Rectangle", "MovieClipLoader",
+    "TextSnapshot", "FileReference", "FileReferenceList", "CustomActions", "TextRenderer", "StyleSheet", "IME",
+    "capabilities", "security", "flash", "XMLSocket", "loadSound", "id3",
+    # natives and host
+    "ASnative", "ASconstructor", "fscommand", "getURL", "getVersion", "$version", "_level1", "_level2",
 ]
 UNSUPPORTED_SET = set(UNSUPPORTED)
 
@@ -171,6 +163,8 @@ def main():
     ap.add_argument("--config", default="Release")
     ap.add_argument("--list-selection", action="store_true")
     ap.add_argument("--timeout", type=int, default=60)
+    ap.add_argument("--min-ruffle", type=float, default=80.0,
+                    help="pass rate (percent) the Ruffle tests must reach (default 80)")
     ap.add_argument("--jobs", type=int, help="parallel build jobs (default: the generator's)")
     args = ap.parse_args()
     swf2c = os.path.abspath(args.swf2c)
@@ -198,8 +192,8 @@ def main():
                 excluded.append((c, "known failure in Ruffle"))
                 continue
             kinds = script_kinds(os.path.join(d, "assets.bin"))
-            if any(k in (3, 4) for k in kinds):
-                excluded.append((c, "clip-event or button scripts"))
+            if os.path.exists(os.path.join(os.path.dirname(c["swf"]), "input.json")):
+                excluded.append((c, "scripted Ruffle input (input.json)"))
                 continue
             if not kinds:
                 excluded.append((c, "no ActionScript"))
@@ -208,9 +202,6 @@ def main():
                 src = f.read()
             if "swf_act_get_url" in src:
                 excluded.append((c, "getURL/loadMovie/loadVariables (network is out of scope)"))
-                continue
-            if edit_text_count(os.path.join(d, "assets.bin")):
-                excluded.append((c, "text fields (TextField built-ins)"))
                 continue
             hits = sorted(atoms_of(os.path.join(d, "game.c")) & UNSUPPORTED_SET)
             if hits:
@@ -315,7 +306,7 @@ def main():
         print(f"avm1 {kind}: {passed}/{len(rs)} passed ({100.0 * passed / len(rs):.1f}%)")
     self_ok = all(r[1] for r in results if r[0]["kind"] == "self")
     ruffle = [r for r in results if r[0]["kind"] == "ruffle"]
-    ruffle_ok = not ruffle or sum(1 for r in ruffle if r[1]) >= 0.8 * len(ruffle)
+    ruffle_ok = not ruffle or sum(1 for r in ruffle if r[1]) >= args.min_ruffle / 100.0 * len(ruffle)
     sys.exit(0 if results and self_ok and ruffle_ok else 1)
 
 

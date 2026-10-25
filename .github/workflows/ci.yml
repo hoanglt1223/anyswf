@@ -128,3 +128,7 @@ jobs:
         run: >
           xvfb-run -a python3 tests/avm1/run-avm1-tests.py --swf2c swf2c/target/release/swf2c
           --out out/avm1 --corpus out/corpus --generator Ninja
+      - name: AVM1 built-ins (Ruffle tests/ruffle-avm1-builtins; known gaps, regression floor)
+        run: >
+          xvfb-run -a python3 tests/avm1/run-avm1-tests.py --swf2c swf2c/target/release/swf2c
+          --out out/avm1-builtins --ruffle tests/ruffle-avm1-builtins --min-ruffle 50 --generator Ninja
