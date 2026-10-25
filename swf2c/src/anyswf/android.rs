@@ -417,6 +417,7 @@ pub fn build(job: &Job) -> Result<()> {
         copy(icon, &res.join("mipmap-xxxhdpi/ic_launcher.png"))?;
     }
     copy(&job.assets_bin(), &dir.join("assets/assets.bin"))?;
+    job.copy_runtime_config(&dir.join("assets"))?;
 
     let exe = std::env::consts::EXE_SUFFIX;
     let aapt2 = tools.build_tools.join(format!("aapt2{exe}"));

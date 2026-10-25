@@ -32,7 +32,7 @@ cmake -S "$root" -B "$build_dir" \
     -DCMAKE_TOOLCHAIN_FILE="$root/cmake/psp.cmake" \
     -DCMAKE_BUILD_TYPE="$config" \
     ${PSP_CMAKE_ARGS:-}
-cmake --build "$build_dir" --parallel
+cmake --build "$build_dir" --parallel "${PSP_JOBS:-4}"
 
 for app in hello player; do
     pbp="$build_dir/apps/$app/EBOOT.PBP"

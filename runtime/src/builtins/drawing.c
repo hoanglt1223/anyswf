@@ -569,6 +569,14 @@ void swf_drawing_render(swf_drawing *d, const swf_matrix *m, const swf_cxform *c
     else swf_render_mesh(m, d->v, d->nv, d->fx, d->nf, cx, blend);
 }
 
+void swf_drawing_mesh(swf_drawing *d, const swf_mesh_vertex **v, const uint16_t **idx, uint32_t *index_count)
+{
+    if (d->dirty) rebuild(d);
+    *v = d->v;
+    *idx = d->ix;
+    *index_count = d->ni;
+}
+
 uint32_t swf_drawing_triangles(const swf_drawing *d)
 {
     return d->ni / 3;

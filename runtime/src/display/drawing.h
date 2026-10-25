@@ -40,5 +40,7 @@ bool swf_drawing_bounds(const swf_drawing *d, const swf_matrix *m, float out[4])
 bool swf_drawing_hit(const swf_drawing *d, float x, float y);
 /* Triangles of the last tessellation; for the profiler. */
 uint32_t swf_drawing_triangles(const swf_drawing *d);
+/* The tessellated mesh (rebuilt if the drawing changed); index_count / 3 triangles. */
+void swf_drawing_mesh(swf_drawing *d, const swf_mesh_vertex **v, const uint16_t **idx, uint32_t *index_count);
 
 #endif

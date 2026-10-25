@@ -239,6 +239,7 @@ static void load_config(const args *a, swf_config *cfg)
     char *text = NULL;
     size_t size = 0;
 #ifdef __PSP__
+    (void)a;
     void *data;
     if (plat_file_read_all(PLAT_ROOT_DATA, "anyswf.toml", &data, &size) == PLAT_OK) text = data;
 #else
@@ -255,7 +256,12 @@ static void load_config(const args *a, swf_config *cfg)
             p = path;
         }
     }
-    if (p) text = read_path(p, &size, false);
+    if (p) {
+        text = read_path(p, &size, false);
+    } else {
+        void *data;
+        if (plat_file_read_all(PLAT_ROOT_DATA, "anyswf.toml", &data, &size) == PLAT_OK) text = data;
+    }
     if (!text && a->config) plat_log("player: cannot read %s; using defaults", a->config);
 #endif
     if (text) {

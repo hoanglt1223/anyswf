@@ -232,7 +232,7 @@ static swf_val method(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *
         return swf_num(o->u.date);
     }
     case TO_STRING: {
-        char buf[64];
+        char buf[96];
         date_string(t, buf, sizeof buf);
         return swf_strv(str_from_ascii(cx->vm, buf));
     }
@@ -327,7 +327,7 @@ static swf_val date_ctor(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_va
 static swf_val date_fn(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv)
 {
     (void)this_; (void)argc; (void)argv;
-    char buf[64];
+    char buf[96];
     date_string(date_now(), buf, sizeof buf);
     return swf_strv(str_from_ascii(cx->vm, buf));
 }

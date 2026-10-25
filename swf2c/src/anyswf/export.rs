@@ -285,6 +285,15 @@ impl Job {
     pub fn assets_bin(&self) -> PathBuf {
         self.gen_dir.join("assets.bin")
     }
+
+    /// Ships the --config file next to assets.bin as anyswf.toml, where the runtime reads
+    /// its per-game settings (keys, cursor, stage scale mode).
+    pub fn copy_runtime_config(&self, dir: &Path) -> Result<()> {
+        match &self.opts.config {
+            Some(c) => copy(c, &dir.join("anyswf.toml")),
+            None => Ok(()),
+        }
+    }
 }
 
 /// CMake wants forward slashes, also on Windows.
@@ -343,6 +352,7 @@ fn build_desktop(job: &Job) -> Result<()> {
         let contents = app.join("Contents");
         copy(&exe, &contents.join("MacOS").join(&job.name))?;
         copy(&job.assets_bin(), &contents.join("Resources/assets.bin"))?;
+        job.copy_runtime_config(&contents.join("Resources"))?;
         write(&contents.join("Info.plist"), &info_plist(job))?;
         if on_path("codesign") {
             run(
@@ -362,6 +372,7 @@ fn build_desktop(job: &Job) -> Result<()> {
         let dest = out.join(&exe_name);
         copy(&exe, &dest)?;
         copy(&job.assets_bin(), &out.join("assets.bin"))?;
+        job.copy_runtime_config(out)?;
         println!("anyswf: {} (+ assets.bin)", dest.display());
     }
     Ok(())
@@ -441,6 +452,7 @@ fn build_psp(job: &Job) -> Result<()> {
     let out = &job.opts.output;
     copy(&eboot, &out.join("EBOOT.PBP"))?;
     copy(&job.assets_bin(), &out.join("assets.bin"))?;
+    job.copy_runtime_config(out)?;
     println!(
         "anyswf: {} (+ assets.bin; copy the folder to ms0:/PSP/GAME/)",
         out.join("EBOOT.PBP").display()
