@@ -144,6 +144,69 @@ static void test_files(void)
     CHECK(plat_file_read_all(PLAT_ROOT_USER, "roundtrip.bin", &data, &size) == PLAT_ERR_STATE);
 }
 
+static void test_key_names(void)
+{
+    CHECK(plat_key_from_name("a") == 65);
+    CHECK(plat_key_from_name("Z") == 90);
+    CHECK(plat_key_from_name("7") == '7');
+    CHECK(plat_key_from_name("LEFT") == 37);
+    CHECK(plat_key_from_name("down") == 40);
+    CHECK(plat_key_from_name("Space") == 32);
+    CHECK(plat_key_from_name("enter") == 13 && plat_key_from_name("return") == 13);
+    CHECK(plat_key_from_name("ctrl") == 17 && plat_key_from_name("control") == 17);
+    CHECK(plat_key_from_name("f1") == 112 && plat_key_from_name("F12") == 123);
+    CHECK(plat_key_from_name("f13") == -1 && plat_key_from_name("f1x") == -1);
+    CHECK(plat_key_from_name("") == -1 && plat_key_from_name(NULL) == -1);
+    CHECK(plat_key_from_name("lefty") == -1);
+    CHECK(strcmp(plat_key_label(37), "LEFT") == 0);
+    CHECK(strcmp(plat_key_label('Q'), "Q") == 0);
+    CHECK(strcmp(plat_key_label(123), "F12") == 0);
+    CHECK(strcmp(plat_key_label(200), "?") == 0);
+
+    plat_input in;
+    memset(&in, 0, sizeof in);
+    plat__key_set(in.keys, 32);
+    plat__key_set(in.keys, 255);
+    plat__key_set(in.keys, 256);
+    CHECK(plat_key_held(&in, 32) && plat_key_held(&in, 255));
+    CHECK(!plat_key_held(&in, 33) && !plat_key_held(&in, 256) && !plat_key_held(&in, -1));
+}
+
+static void test_letterbox(void)
+{
+    int vp[4];
+    plat__letterbox(960, 544, 480, 272, vp);
+    CHECK(vp[0] == 0 && vp[1] == 0 && vp[2] == 960 && vp[3] == 544);
+    plat__letterbox(1920, 544, 480, 272, vp); /* wide window: bars left and right */
+    CHECK(vp[0] == 480 && vp[1] == 0 && vp[2] == 960 && vp[3] == 544);
+    plat__letterbox(550, 1000, 550, 400, vp); /* tall window: bars above and below */
+    CHECK(vp[0] == 0 && vp[1] == 300 && vp[2] == 550 && vp[3] == 400);
+    plat__letterbox(0, 100, 480, 272, vp);
+    CHECK(vp[2] == 0 && vp[3] == 0);
+}
+
+static void test_touch_layout(void)
+{
+    const uint8_t codes[] = {37, 38, 39, 40, 32, 'Z'};
+    float r[6][4];
+    plat__touch_layout(codes, 6, 1000, 500, r);
+    float s = 500 * 0.14f;
+    for (int i = 0; i < 6; i++) {
+        CHECK(near(r[i][2], s) && near(r[i][3], s));
+        CHECK(r[i][0] >= 0 && r[i][1] >= 0 && r[i][0] + r[i][2] <= 1000 && r[i][1] + r[i][3] <= 500);
+    }
+    CHECK(r[0][0] < r[1][0] && r[1][0] < r[2][0]); /* left, up, right across the d-pad */
+    CHECK(r[1][1] < r[0][1] && r[0][1] < r[3][1]); /* up above left above down */
+    CHECK(r[4][0] > 500 && r[5][0] < r[4][0]);     /* other keys bottom right, filling leftwards */
+    /* No two buttons overlap. */
+    for (int i = 0; i < 6; i++)
+        for (int j = i + 1; j < 6; j++)
+            CHECK(r[i][0] + r[i][2] <= r[j][0] || r[j][0] + r[j][2] <= r[i][0] ||
+                  r[i][1] + r[i][3] <= r[j][1] || r[j][1] + r[j][3] <= r[i][1]);
+    CHECK(plat__touch_hit((const float(*)[4])r, 6, r[4][0] + 1, r[4][1] + 1) == 4);
+    CHECK(plat__touch_hit((const float(*)[4])r, 6, 500, 10) == -1);
+}
+
 static void test_clock(void)
 {
     uint64_t a = plat_time_us();
@@ -157,6 +220,9 @@ int main(void)
     test_app_id();
     test_deadzone_and_edges();
     test_files();
+    test_key_names();
+    test_letterbox();
+    test_touch_layout();
     test_clock();
     if (failures) {
         fprintf(stderr, "%d check(s) failed\n", failures);

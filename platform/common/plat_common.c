@@ -149,3 +149,111 @@ plat_result plat_file_remove(plat_root root, const char *rel)
     if (r != PLAT_OK) return r;
     return plat__remove_full(full);
 }
+
+static const struct {
+    const char *name;
+    const char *label;
+    uint8_t code;
+} key_names[] = {
+    {"backspace", "BKSP", 8}, {"tab", "TAB", 9},      {"enter", "ENTER", 13},  {"shift", "SHIFT", 16},
+    {"control", "CTRL", 17},  {"alt", "ALT", 18},     {"escape", "ESC", 27},   {"space", "SPACE", 32},
+    {"pageup", "PGUP", 33},   {"pagedown", "PGDN", 34}, {"end", "END", 35},    {"home", "HOME", 36},
+    {"left", "LEFT", 37},     {"up", "UP", 38},       {"right", "RIGHT", 39},  {"down", "DOWN", 40},
+    {"insert", "INS", 45},    {"delete", "DEL", 46},
+};
+
+static int lower(int c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
+
+static bool name_eq(const char *a, const char *b)
+{
+    while (*a && *b && lower((unsigned char)*a) == lower((unsigned char)*b)) a++, b++;
+    return *a == 0 && *b == 0;
+}
+
+int plat_key_from_name(const char *name)
+{
+    if (!name || !*name) return -1;
+    int c = lower((unsigned char)name[0]);
+    if (!name[1]) {
+        if (c >= 'a' && c <= 'z') return c - 32;
+        if (c >= '0' && c <= '9') return c;
+    }
+    if (c == 'f' && name[1] >= '1' && name[1] <= '9') {
+        int n = name[1] - '0';
+        if (name[2] >= '0' && name[2] <= '9' && !name[3]) n = n * 10 + (name[2] - '0');
+        else if (name[2]) n = 0;
+        if (n >= 1 && n <= 12) return 111 + n;
+    }
+    for (size_t i = 0; i < sizeof key_names / sizeof key_names[0]; i++)
+        if (name_eq(name, key_names[i].name)) return key_names[i].code;
+    if (name_eq(name, "ctrl")) return 17;
+    if (name_eq(name, "esc")) return 27;
+    if (name_eq(name, "return")) return 13;
+    return -1;
+}
+
+const char *plat_key_label(int code)
+{
+    static const char alnum[36][2] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B",
+                                      "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N",
+                                      "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"};
+    static const char fkeys[12][4] = {"F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"};
+    if (code >= '0' && code <= '9') return alnum[code - '0'];
+    if (code >= 'A' && code <= 'Z') return alnum[10 + code - 'A'];
+    if (code >= 112 && code <= 123) return fkeys[code - 112];
+    for (size_t i = 0; i < sizeof key_names / sizeof key_names[0]; i++)
+        if (key_names[i].code == code) return key_names[i].label;
+    return "?";
+}
+
+void plat__letterbox(int win_w, int win_h, int scr_w, int scr_h, int vp[4])
+{
+    if (win_w <= 0 || win_h <= 0 || scr_w <= 0 || scr_h <= 0) {
+        vp[0] = vp[1] = vp[2] = vp[3] = 0;
+        return;
+    }
+    /* Integer cross-multiplication: the exact fit stays exact (no off-by-one bars). */
+    long long w = win_w, h = (long long)win_w * scr_h / scr_w;
+    if (h > win_h) {
+        h = win_h;
+        w = (long long)win_h * scr_w / scr_h;
+    }
+    vp[2] = (int)w;
+    vp[3] = (int)h;
+    vp[0] = (win_w - vp[2]) / 2;
+    vp[1] = (win_h - vp[3]) / 2;
+}
+
+void plat__touch_layout(const uint8_t *codes, int count, int win_w, int win_h, float rects[][4])
+{
+    float s = (float)(win_w < win_h ? win_w : win_h) * 0.14f;
+    float margin = s * 0.35f, step = s * 1.15f;
+    float cx = margin + 1.5f * s, cy = (float)win_h - margin - 1.5f * s;
+    int other = 0;
+    for (int i = 0; i < count; i++) {
+        float x, y;
+        switch (codes[i]) {
+        case 37: x = cx - 1.5f * s; y = cy - 0.5f * s; break;
+        case 38: x = cx - 0.5f * s; y = cy - 1.5f * s; break;
+        case 39: x = cx + 0.5f * s; y = cy - 0.5f * s; break;
+        case 40: x = cx - 0.5f * s; y = cy + 0.5f * s; break;
+        default:
+            x = (float)win_w - margin - (float)(other % 3 + 1) * step;
+            y = (float)win_h - margin - (float)(other / 3 + 1) * step;
+            other++;
+            break;
+        }
+        rects[i][0] = x;
+        rects[i][1] = y;
+        rects[i][2] = s;
+        rects[i][3] = s;
+    }
+}
+
+int plat__touch_hit(const float rects[][4], int count, float x, float y)
+{
+    for (int i = 0; i < count; i++)
+        if (x >= rects[i][0] && x < rects[i][0] + rects[i][2] && y >= rects[i][1] && y < rects[i][1] + rects[i][3])
+            return i;
+    return -1;
+}

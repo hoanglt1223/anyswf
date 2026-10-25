@@ -19,10 +19,13 @@
 extern "C" {
 #endif
 
-#define PLAT_API_VERSION 1
+#define PLAT_API_VERSION 2
 
+/* PSP screen size; the default logical screen on PC. */
 #define PLAT_SCREEN_W 480
 #define PLAT_SCREEN_H 272
+/* Largest logical screen a PC config may ask for. */
+#define PLAT_SCREEN_MAX 4096
 #define PLAT_FRAME_HZ 60
 
 /* sceAudio output channels run at a fixed 44.1 kHz, so both backends do. */
@@ -45,13 +48,30 @@ typedef enum plat_result {
 typedef struct plat_config {
     const char *app_id;   /* [A-Za-z0-9_-], 1..PLAT_APP_ID_MAX chars; names the user data dir */
     const char *title;    /* window title on PC; may be NULL */
-    int window_scale;     /* PC window is 480x272 times this; <= 0 selects 2 */
+    int window_scale;     /* PC window is the logical screen times this; <= 0 selects 2 */
     bool vsync;
     bool headless;        /* PC only: hidden window and silent dummy audio driver, for CI/smoke runs */
+    /* Logical screen in pixels, 0 = PLAT_SCREEN_W x PLAT_SCREEN_H (the only size on PSP).
+     * PC windows are resizable; the frame viewport keeps this aspect ratio, centred, and
+     * plat_frame_begin clears the bars around it too. */
+    int screen_w, screen_h;
+    int msaa;             /* PC only: multisample count (0 = off); falls back to off if unavailable */
+    /* PC only: Flash key codes shown as on-screen touch buttons once the screen is touched
+     * (always on Android). Pressing one sets its bit in plat_input.keys. */
+    const uint8_t *touch_keys;
+    int touch_key_count;  /* at most PLAT_TOUCH_KEYS_MAX */
 } plat_config;
+
+#define PLAT_TOUCH_KEYS_MAX 12
 
 plat_result plat_init(const plat_config *cfg);
 void plat_shutdown(void);
+
+/* Changes the logical screen after plat_init (e.g. once a movie's size is known). On PC the
+ * window is resized to the new size times window_scale; a headless window and its GL
+ * context are recreated, so call this before creating GL objects. The PSP accepts only
+ * 480x272. */
+plat_result plat_set_screen_size(int w, int h);
 
 /* Pumps OS events, samples input, binds the frame and clears it to clear_rgb
  * (0xRRGGBB) with stencil 0. Returns false once the user asked to quit; the
@@ -84,10 +104,30 @@ typedef struct plat_input {
     uint32_t released;  /* went up since the previous frame */
     float stick_x;      /* analog nub, -1..1 after dead zone, +x right */
     float stick_y;      /* -1..1, +y down */
+    /* PC only (zero on PSP): mouse, or the first touch that is not on a touch button,
+     * in logical screen pixels. pointer_in is false while it is outside the viewport. */
+    float pointer_x, pointer_y;
+    bool pointer_down;   /* left button or finger down */
+    bool pointer_in;
+    /* PC only: keys held, as a bit set of Flash key codes (Key.isDown values: 'A' = 65,
+     * left = 37, space = 32, ...). Test with plat_key_held. */
+    uint32_t keys[8];
 } plat_input;
 
 /* Input as sampled by the last plat_frame_begin. */
 void plat_input_get(plat_input *out);
+
+static inline bool plat_key_held(const plat_input *in, int code)
+{
+    return code >= 0 && code < 256 && (in->keys[code >> 5] >> (code & 31)) & 1u;
+}
+
+/* Flash key code for a key name: a single letter or digit, "left", "right", "up", "down",
+ * "space", "enter", "shift", "control", "escape", "backspace", "tab", "f1".."f12".
+ * Case-insensitive. Returns -1 for an unknown name. */
+int plat_key_from_name(const char *name);
+/* Short upper-case label for a key code ("LEFT", "A", "SPACE"); "?" if unknown. */
+const char *plat_key_label(int code);
 
 /* Fills frames * PLAT_AUDIO_CHANNELS interleaved signed 16-bit samples.
  * Runs on the audio thread: it must not call other plat_* functions. */

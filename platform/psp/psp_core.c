@@ -74,6 +74,11 @@ plat_result plat_init(const plat_config *cfg)
 {
     if (initialised) return PLAT_ERR_STATE;
     if (!cfg || !plat__app_id_is_valid(cfg->app_id)) return PLAT_ERR_INVALID;
+    if ((cfg->screen_w || cfg->screen_h) && (cfg->screen_w != PLAT_SCREEN_W || cfg->screen_h != PLAT_SCREEN_H)) {
+        plat_log("plat: the PSP screen is %dx%d, not %dx%d", PLAT_SCREEN_W, PLAT_SCREEN_H, cfg->screen_w,
+                 cfg->screen_h);
+        return PLAT_ERR_INVALID;
+    }
 
     SceUID thid = sceKernelCreateThread("plat_cb", callback_thread, 0x11, 0x1000, PSP_THREAD_ATTR_USER, NULL);
     if (thid < 0) {
@@ -108,6 +113,12 @@ void plat_shutdown(void)
     sceGuTerm();
     plat__files_shutdown();
     initialised = false;
+}
+
+plat_result plat_set_screen_size(int w, int h)
+{
+    if (!initialised) return PLAT_ERR_STATE;
+    return w == PLAT_SCREEN_W && h == PLAT_SCREEN_H ? PLAT_OK : PLAT_ERR_INVALID;
 }
 
 void plat_set_vsync(bool on)
