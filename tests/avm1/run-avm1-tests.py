@@ -9,7 +9,8 @@ compares the trace output with the expected output (Flash Player's, for Ruffle t
 Self-authored tests may have <name>.toml next to the SWF: num_frames (default 1), input
 (the player's --input script), runs (default 1: later runs reuse the case's save
 directory, for SharedObject; the expected output is all runs' output in order) and
-audio = true (the run must mix non-silent sound, checked through --wav). Runs use TZ=UTC.
+audio = true (the run must mix non-silent sound, checked through --wav). Runs use TZ=UTC
+(`utc = true` marks tests that rely on it; the PSP runner skips those).
 
 Ruffle tests are selected statically (before running): the movie must be AVM1, need no
 injected input (input.json) or network, and name none of the features in UNSUPPORTED.

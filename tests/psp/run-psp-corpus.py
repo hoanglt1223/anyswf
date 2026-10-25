@@ -7,6 +7,10 @@ movie's trace output with its .expected file.
 Each movie is built with `anyswf build --target psp` (one shared work folder, so only the
 game code recompiles) and run from a scratch memory stick in Docker. PPSSPP prints the
 player's log on stdout; lines starting with "plat:" and the final TIMEOUT line are not trace.
+A test's <name>.toml may ask for several runs (`runs`, for SharedObject: the memory stick
+is kept between them). Tests with scripted input (`input`) are skipped: PPSSPPHeadless
+cannot place the cursor, and their frame-exact timing needs the PC player's headless clock.
+Tests with `utc = true` expect local time to be UTC and are skipped too.
 """
 
 import argparse
@@ -14,6 +18,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tomllib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -47,7 +52,21 @@ def main():
     stick = os.path.join(out, "ms")
     user = [] if os.name == "nt" else ["--user", f"{os.getuid()}:{os.getgid()}"]
     passed = 0
+    skipped = 0
     for name in names:
+        meta = {}
+        toml_path = os.path.join(args.corpus, name + ".toml")
+        if os.path.isfile(toml_path):
+            with open(toml_path, "rb") as tf:
+                meta = tomllib.load(tf)
+        if meta.get("input"):
+            print(f"SKIP {name}: scripted input")
+            skipped += 1
+            continue
+        if meta.get("utc"):
+            print(f"SKIP {name}: expects a UTC local time zone (set in the emulator's or console's settings)")
+            skipped += 1
+            continue
         game = os.path.join(out, "games", name)
         r = subprocess.run([args.anyswf, "build", os.path.join(args.corpus, name + ".swf"), "--target", "psp",
                             "-o", game, "--work", os.path.join(out, "work"), "--title", name],
@@ -58,11 +77,14 @@ def main():
         folder = os.path.join(stick, "PSP", "GAME", name.upper())
         shutil.rmtree(folder, ignore_errors=True)
         shutil.copytree(game, folder)
-        r = subprocess.run(["docker", "run", "--rm", *user, "-v", f"{out}:/w", "-w", "/w", args.image,
-                            "PPSSPPHeadless", "--memstick=/w/ms", f"--timeout-emulated={args.seconds}",
-                            f"/w/ms/PSP/GAME/{name.upper()}/EBOOT.PBP"],
-                           capture_output=True, text=True, errors="replace")
-        got = normalize(r.stdout)
+        shutil.rmtree(os.path.join(stick, "PSP", "SAVEDATA", name), ignore_errors=True)
+        got = []
+        for _ in range(int(meta.get("runs", 1))):
+            r = subprocess.run(["docker", "run", "--rm", *user, "-v", f"{out}:/w", "-w", "/w", args.image,
+                                "PPSSPPHeadless", "--memstick=/w/ms", f"--timeout-emulated={args.seconds}",
+                                f"/w/ms/PSP/GAME/{name.upper()}/EBOOT.PBP"],
+                               capture_output=True, text=True, errors="replace")
+            got += normalize(r.stdout)
         with open(os.path.join(args.corpus, name + ".expected"), encoding="utf-8", errors="replace") as f:
             want = normalize(f.read())
         if got == want:
@@ -73,8 +95,8 @@ def main():
             g = got[at] if at < len(got) else "<end>"
             w = want[at] if at < len(want) else "<end>"
             print(f"FAIL {name}: line {at + 1}: got {g!r}, want {w!r}")
-    print(f"psp corpus: {passed}/{len(names)} passed")
-    return 0 if passed == len(names) else 1
+    print(f"psp corpus: {passed}/{len(names) - skipped} passed, {skipped} skipped")
+    return 0 if passed == len(names) - skipped else 1
 
 
 if __name__ == "__main__":

@@ -81,9 +81,9 @@ static void vram_upload(void *dst, const void *src, size_t size)
 plat_result swf_render_init(const swf_assets *a)
 {
     if (!g_vram_arena) {
-        uint8_t *base = (uint8_t *)sceGeEdramGetAddr();
-        uint8_t *next = base + (uintptr_t)guGetStaticVramTexture(0, 0, GU_PSM_8888);
-        uintptr_t end = (uintptr_t)base + sceGeEdramGetSize();
+        /* guGetStaticVramTexture returns the absolute address of the next free byte. */
+        uint8_t *next = (uint8_t *)guGetStaticVramTexture(0, 0, GU_PSM_8888);
+        uintptr_t end = (uintptr_t)sceGeEdramGetAddr() + sceGeEdramGetSize();
         next = (uint8_t *)(((uintptr_t)next + 15) & ~(uintptr_t)15);
         if ((uintptr_t)next < end) {
             g_vram_arena = next;
