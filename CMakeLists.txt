@@ -26,9 +26,19 @@ endif()
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/anyswf-game.cmake)
 
+# `anyswf build` sets these to build one compiled movie and nothing else.
+set(ANYSWF_GAME_C "" CACHE FILEPATH "game.c from swf2c compile; builds only that game")
+set(ANYSWF_GAME_NAME "game" CACHE STRING "Executable (or Android library) target name for ANYSWF_GAME_C")
+set(ANYSWF_GAME_TITLE "" CACHE STRING "Window / EBOOT / app title for ANYSWF_GAME_C")
+set(ANYSWF_GAME_ID "" CACHE STRING "Save folder id for ANYSWF_GAME_C ([A-Za-z0-9_-], at most 32 characters)")
+
 add_subdirectory(platform)
-add_subdirectory(apps/hello)
 add_subdirectory(runtime)
+if(ANYSWF_GAME_C)
+    anyswf_add_game(${ANYSWF_GAME_NAME} "${ANYSWF_GAME_C}" TITLE "${ANYSWF_GAME_TITLE}" APP_ID "${ANYSWF_GAME_ID}")
+    return()
+endif()
+add_subdirectory(apps/hello)
 add_subdirectory(apps/player)
 
 if(NOT PSP)
