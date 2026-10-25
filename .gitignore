@@ -9,5 +9,6 @@
 # Ruffle's MIT/Apache test movies are the one exception (see tests/ruffle/README.md).
 !tests/ruffle/**/*.swf
 !tests/ruffle-avm1/**/*.swf
+!tests/ruffle-avm1-builtins/**/*.swf
 __pycache__/
 *.pyc
