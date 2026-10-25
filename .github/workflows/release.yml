@@ -1,8 +1,8 @@
 name: release
 
-# Pushing a tag such as v0.1.0 builds swf2c and anyswf-player for Windows, Linux and
-# macOS plus the PSP EBOOTs, and publishes them on a GitHub Release. Compiled games are
-# built from the release's source archive with cmake/anyswf-game.cmake.
+# Pushing a tag such as v0.1.0 builds swf2c, anyswf and anyswf-player for Windows, Linux
+# and macOS plus the PSP EBOOTs, and publishes them on a GitHub Release. Each PC package
+# carries the source tree in share/anyswf/source, which `anyswf build` compiles games from.
 on:
   push:
     tags: ["v*"]
@@ -56,7 +56,11 @@ jobs:
         run: |
           dir="anyswf-${{ github.ref_name }}-${{ matrix.name }}"
           mkdir -p "$dir"
-          cp "swf2c/target/release/swf2c${{ matrix.exe }}" "${{ matrix.player }}" LICENSE THIRD_PARTY.md README.md "$dir/"
+          cp "swf2c/target/release/swf2c${{ matrix.exe }}" "swf2c/target/release/anyswf${{ matrix.exe }}" \
+            "${{ matrix.player }}" LICENSE THIRD_PARTY.md README.md "$dir/"
+          # anyswf build compiles games from this source tree (found next to the program).
+          mkdir -p "$dir/share/anyswf/source"
+          git archive HEAD | tar -x -C "$dir/share/anyswf/source"
           if [ "${{ runner.os }}" = "Windows" ]; then
             7z a "$dir.zip" "$dir" > /dev/null
           else

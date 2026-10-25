@@ -40,6 +40,12 @@ jobs:
         run: xvfb-run -a out/linux/apps/hello/hello --smoke
       - name: Render tests against Ruffle references (headless, Mesa software GL)
         run: xvfb-run -a bash tests/render/run.sh out/linux/apps/player/anyswf-player
+      - name: Export a test movie as a native Linux game and run it headless
+        run: |
+          out/cargo/release/anyswf build out/gen/g12_scaled_stage.swf --target linux \
+            -o out/export/linux --title "Scaled Stage"
+          xvfb-run -a out/export/linux/Scaled-Stage --screenshot out/export/scaled-stage.png
+          python3 -c "import struct,sys; d=open('out/export/scaled-stage.png','rb').read(); sys.exit(struct.unpack('>II', d[16:24]) != (550, 400))"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
@@ -54,6 +60,24 @@ jobs:
       - run: cmake --build out/msvc --config Release --parallel
       - run: ctest --test-dir out/msvc -C Release --output-on-failure
       # No smoke run: hosted Windows runners have no OpenGL 2.1 driver.
+
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The runner image ships the Android SDK (ANDROID_HOME), NDKs and JDK 17.
+      - run: cargo build --release --locked --manifest-path swf2c/Cargo.toml
+      - run: cargo run --release --locked --manifest-path swf2c/Cargo.toml --example gen_test_swfs -- out/gen
+      - name: Debug APK of a test movie
+        run: >
+          swf2c/target/release/anyswf build out/gen/g12_scaled_stage.swf --target android
+          -o out/export/android --title "Scaled Stage" --touch-keys left,right,up,down,space
+          --android-ndk "$ANDROID_NDK_LATEST_HOME"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-apk
+          path: out/export/android/*.apk
+          if-no-files-found: error
 
   psp:
     runs-on: ubuntu-24.04
