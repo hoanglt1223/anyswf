@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
-use swf2c::{assets_bin, characters, convert, parse};
+use swf2c::targets::Target;
+use swf2c::{characters, convert, parse, pipeline};
 
 const USAGE: &str = "\
 usage: swf2c <command> [args]
@@ -9,13 +10,13 @@ commands:
   inspect <game.swf>                       print the header and character table
   assets <game.swf> -o <assets.bin>        convert shapes, bitmaps, sounds and timelines
          [--tolerance <px>]                curve flattening error in screen pixels (default 0.35)
+         [--target psp|pc|android]         screen and detail settings (default psp)
   compile <game.swf> -o <dir>              write <dir>/game.c (compiled ActionScript) and
-         [--tolerance <px>]                <dir>/assets.bin
+         [--tolerance <px>] [--target ...] <dir>/assets.bin
   help                                     show this message
   version                                  print the swf2c version
 ";
 
-#[derive(Debug, PartialEq)]
 enum Command {
     Help,
     Version,
@@ -23,16 +24,16 @@ enum Command {
     Assets {
         input: PathBuf,
         output: PathBuf,
-        tolerance: f32,
+        options: convert::Options,
     },
     Compile {
         input: PathBuf,
         output: PathBuf,
-        tolerance: f32,
+        options: convert::Options,
     },
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 struct ArgError(String);
 
 fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Command, ArgError> {
@@ -48,7 +49,8 @@ fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Command, ArgErr
             let compile = cmd == "compile";
             let mut input = None;
             let mut output = None;
-            let mut tolerance = convert::Options::default().tolerance_px;
+            let mut tolerance = None;
+            let mut target = Target::Psp;
             while let Some(a) = args.next() {
                 match a.as_str() {
                     "-o" => output = Some(args.next().ok_or(ArgError("-o needs a path".into()))?),
@@ -56,66 +58,39 @@ fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Command, ArgErr
                         let v = args
                             .next()
                             .ok_or(ArgError("--tolerance needs a value".into()))?;
-                        tolerance = v
-                            .parse::<f32>()
-                            .ok()
-                            .filter(|t| t.is_finite() && *t > 0.0 && *t <= 10.0)
-                            .ok_or(ArgError(format!("bad tolerance '{v}' (0 < px <= 10)")))?;
+                        tolerance = Some(
+                            pipeline::parse_tolerance(&v)
+                                .ok_or(ArgError(format!("bad tolerance '{v}' (0 < px <= 10)")))?,
+                        );
+                    }
+                    "--target" => {
+                        let v = args
+                            .next()
+                            .ok_or(ArgError("--target needs a name".into()))?;
+                        target = Target::parse(&v)
+                            .ok_or(ArgError(format!("unknown target '{v}' (psp, pc, android)")))?;
                     }
                     _ if input.is_none() && !a.starts_with('-') => input = Some(a),
                     _ => return Err(ArgError(format!("unexpected argument '{a}'"))),
                 }
             }
+            let options = target.options(tolerance);
             match (input, output) {
                 (Some(i), Some(o)) if compile => Ok(Command::Compile {
                     input: i.into(),
                     output: o.into(),
-                    tolerance,
+                    options,
                 }),
                 (Some(i), Some(o)) => Ok(Command::Assets {
                     input: i.into(),
                     output: o.into(),
-                    tolerance,
+                    options,
                 }),
                 _ => Err(ArgError(format!("{cmd} needs <game.swf> and -o <path>"))),
             }
         }
         Some(other) => Err(ArgError(format!("unknown command '{other}'"))),
     }
-}
-
-fn write_file(path: &std::path::Path, data: &[u8]) -> Result<(), swf2c::Error> {
-    std::fs::write(path, data)
-        .map_err(|e| swf2c::Error::new(format!("cannot write {}: {e}", path.display())))
-}
-
-fn convert_assets(
-    swf: &swf::Swf,
-    tolerance: f32,
-    output: &std::path::Path,
-) -> Result<(), swf2c::Error> {
-    let out = convert::convert(
-        swf,
-        &convert::Options {
-            tolerance_px: tolerance,
-        },
-    )?;
-    for w in &out.warnings {
-        eprintln!("swf2c: warning: {w}");
-    }
-    let bin = assets_bin::serialize(&out.assets);
-    write_file(output, &bin)?;
-    let s = &out.stats;
-    println!(
-        "swf2c: {} bytes -> {} ({} draws, {} triangles, {} KiB textures, {} KiB sound)",
-        bin.len(),
-        output.display(),
-        s.draws,
-        s.triangles,
-        s.texture_bytes / 1024,
-        s.sound_bytes / 1024
-    );
-    Ok(())
 }
 
 fn run(cmd: Command) -> Result<(), swf2c::Error> {
@@ -131,42 +106,17 @@ fn run(cmd: Command) -> Result<(), swf2c::Error> {
         Command::Assets {
             input,
             output,
-            tolerance,
+            options,
         } => {
             let buf = parse::read_file(&input)?;
             let swf = parse::parse(&buf)?;
-            convert_assets(&swf, tolerance, &output)?;
+            pipeline::convert_assets(&swf, &options, &output)?;
         }
         Command::Compile {
             input,
             output,
-            tolerance,
-        } => {
-            let buf = parse::read_file(&input)?;
-            let swf = parse::parse(&buf)?;
-            std::fs::create_dir_all(&output).map_err(|e| {
-                swf2c::Error::new(format!("cannot create {}: {e}", output.display()))
-            })?;
-            convert_assets(&swf, tolerance, &output.join("assets.bin"))?;
-            let scripts = swf2c::scripts::Scripts::collect(&swf.tags);
-            let name = input
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let code = swf2c::avm1::emit_c::emit_movie(swf.header.version(), &scripts, &name)?;
-            for w in &code.warnings {
-                eprintln!("swf2c: warning: {w}");
-            }
-            let c_path = output.join("game.c");
-            write_file(&c_path, code.source.as_bytes())?;
-            println!(
-                "swf2c: {} scripts, {} functions ({} with a dynamic stack) -> {}",
-                scripts.list.len(),
-                code.functions,
-                code.dynamic_blocks,
-                c_path.display()
-            );
-        }
+            options,
+        } => pipeline::compile(&input, &output, &options)?,
     }
     Ok(())
 }
@@ -198,14 +148,14 @@ mod tests {
 
     #[test]
     fn no_args_shows_help() {
-        assert_eq!(parse(&[]), Ok(Command::Help));
-        assert_eq!(parse(&["--help"]), Ok(Command::Help));
+        assert!(matches!(parse(&[]), Ok(Command::Help)));
+        assert!(matches!(parse(&["--help"]), Ok(Command::Help)));
     }
 
     #[test]
     fn version_aliases() {
-        assert_eq!(parse(&["version"]), Ok(Command::Version));
-        assert_eq!(parse(&["-V"]), Ok(Command::Version));
+        assert!(matches!(parse(&["version"]), Ok(Command::Version)));
+        assert!(matches!(parse(&["-V"]), Ok(Command::Version)));
     }
 
     #[test]
@@ -215,14 +165,23 @@ mod tests {
 
     #[test]
     fn assets_arguments() {
-        assert_eq!(
-            parse(&["assets", "a.swf", "-o", "a.bin", "--tolerance", "0.5"]),
+        match parse(&["assets", "a.swf", "-o", "a.bin", "--tolerance", "0.5"]) {
             Ok(Command::Assets {
-                input: "a.swf".into(),
-                output: "a.bin".into(),
-                tolerance: 0.5
-            })
-        );
+                input,
+                output,
+                options,
+            }) => {
+                assert_eq!((input, output), ("a.swf".into(), "a.bin".into()));
+                assert_eq!(options.tolerance_px, 0.5);
+                assert_eq!(options.screen, Some((480, 272)));
+            }
+            _ => panic!("expected assets"),
+        }
+        match parse(&["compile", "a.swf", "--target", "pc", "-o", "d"]) {
+            Ok(Command::Compile { options, .. }) => assert_eq!(options.screen, None),
+            _ => panic!("expected compile"),
+        }
+        assert!(parse(&["compile", "a.swf", "-o", "d", "--target", "ps2"]).is_err());
         assert!(parse(&["assets", "a.swf"]).is_err());
         assert!(parse(&["assets", "a.swf", "-o", "x", "--tolerance", "-1"]).is_err());
         assert!(parse(&["inspect"]).is_err());

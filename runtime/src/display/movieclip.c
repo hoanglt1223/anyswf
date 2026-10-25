@@ -74,8 +74,8 @@ swf_matrix swf_movie_stage_matrix(const swf_assets *a)
     float w = (a->stage[2] - a->stage[0]) * s;
     float h = (a->stage[3] - a->stage[1]) * s;
     swf_matrix m = {s, 0, 0, s, 0, 0};
-    m.tx = (PLAT_SCREEN_W - w) * 0.5f - a->stage[0] * s;
-    m.ty = (PLAT_SCREEN_H - h) * 0.5f - a->stage[1] * s;
+    m.tx = (a->screen_w - w) * 0.5f - a->stage[0] * s;
+    m.ty = (a->screen_h - h) * 0.5f - a->stage[1] * s;
     return m;
 }
 

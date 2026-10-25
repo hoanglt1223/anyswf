@@ -23,9 +23,15 @@ the `DATA`, `STRS` or `CMDS` blocks (not file offsets). `NONE` is `0xFFFFFFFF`.
 | 32 | 2 | frame rate, 8.8 fixed point |
 | 34 | 2 | SWF version |
 | 36 | 4 | background colour, bytes R, G, B, A |
-| 40 | 4 | f32 target scale (stage pixels to 480x272 screen pixels, "show all") |
+| 40 | 4 | f32 target scale (stage pixels to screen pixels, "show all") |
 | 44 | 4 | uncompressed SWF length (MovieClip.getBytesTotal) |
-| 48 | 16 | reserved, zero |
+| 48 | 2 | u16 logical screen width; 0 together with the height means 480 |
+| 50 | 2 | u16 logical screen height; 0 together with the width means 272 |
+| 52 | 12 | reserved, zero |
+
+The screen is the PSP's 480x272 for `--target psp` (the default) and the stage size for
+`--target pc` and `android` (see `swf2c/src/targets.rs`). The runtime refuses a screen
+above 4096 pixels on either side, and the PSP build refuses anything but 480x272.
 
 The block directory follows at offset 64: one 16-byte entry per block, `char tag[4]`,
 `u32 offset`, `u32 size`, `u32 count`. Every block starts on a 64-byte boundary of the

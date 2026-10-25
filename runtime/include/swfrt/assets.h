@@ -201,8 +201,9 @@ typedef struct swf_assets {
     float frame_rate;
     uint16_t swf_version;
     uint32_t background; /* RGBA bytes, R lowest */
-    float target_scale;
+    float target_scale;  /* stage pixels to screen pixels */
     uint32_t swf_size;   /* uncompressed SWF length */
+    uint16_t screen_w, screen_h; /* logical screen the movie is laid out on (480x272 for PSP builds) */
 
     swf_char *chars;          uint32_t char_count;
     swf_shape *shapes;        uint32_t shape_count;

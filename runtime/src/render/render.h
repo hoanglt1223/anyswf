@@ -40,7 +40,8 @@ void swf_render_mask_pop_end(void);
 bool swf_render_layer_begin(void);
 void swf_render_layer_end(uint8_t blend);
 
-/* Reads back the frame being drawn as RGB (480x272, top row first). False if unsupported. */
-bool swf_render_read_rgb(uint8_t *rgb);
+/* Reads back the frame being drawn as w x h RGB (normally the movie's logical screen),
+ * top row first, resampling the viewport if its size differs. False if unsupported. */
+bool swf_render_read_rgb(uint8_t *rgb, int w, int h);
 
 #endif

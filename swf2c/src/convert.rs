@@ -19,15 +19,36 @@ pub const SCREEN_H: f32 = 272.0;
 /// Glyph meshes for runtime text are tessellated for roughly this text height in pixels.
 const GLYPH_REF_PX: f64 = 24.0;
 
+/// Conversion settings; `targets::Target::options` gives the per-target values. The
+/// default is the PSP.
 pub struct Options {
     /// Maximum curve flattening error in screen pixels at the stage scale.
     pub tolerance_px: f32,
+    /// Logical screen the stage is fitted into; `None` keeps the stage size (scale 1).
+    pub screen: Option<(u16, u16)>,
+    /// Display pixels per logical screen pixel that curves, gradients and bitmaps keep
+    /// detail for (bitmaps never beyond their own resolution).
+    pub detail: f32,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { tolerance_px: 0.35 }
+        Options {
+            tolerance_px: 0.35,
+            screen: Some((SCREEN_W as u16, SCREEN_H as u16)),
+            detail: 1.0,
+        }
     }
+}
+
+/// The logical screen for `opts`: the fixed target screen, or the stage size rounded to
+/// whole pixels (at least 1, at most 4096, the runtime's limit).
+pub fn screen_size(stage: &swf::Rectangle<swf::Twips>, opts: &Options) -> (u16, u16) {
+    if let Some(s) = opts.screen {
+        return s;
+    }
+    let px = |t: swf::Twips| (t.to_pixels().round()).clamp(1.0, 4096.0) as u16;
+    (px(stage.x_max - stage.x_min), px(stage.y_max - stage.y_min))
 }
 
 #[derive(Default, Debug)]
@@ -54,6 +75,7 @@ struct Conv<'a> {
     scripts: &'a Scripts<'a>,
     a: Assets,
     tol_twips: f32,
+    detail: f32,
     min_stroke: f32,
     bitmaps: HashMap<(u16, bool), BitmapEntry>,
     decoded: HashMap<u16, Option<bitmaps::Image>>,
@@ -65,13 +87,14 @@ struct Conv<'a> {
     stats: Stats,
 }
 
-pub fn target_scale(stage: &swf::Rectangle<swf::Twips>) -> f32 {
+/// Stage pixels to screen pixels ("show all" fit of the stage into `screen`).
+pub fn target_scale(stage: &swf::Rectangle<swf::Twips>, screen: (u16, u16)) -> f32 {
     let w = (stage.x_max - stage.x_min).to_pixels() as f32;
     let h = (stage.y_max - stage.y_min).to_pixels() as f32;
     if w <= 0.0 || h <= 0.0 {
         return 1.0;
     }
-    (SCREEN_W / w).min(SCREEN_H / h)
+    (screen.0 as f32 / w).min(screen.1 as f32 / h)
 }
 
 pub fn convert(swf: &swf::Swf, opts: &Options) -> Result<Output> {
@@ -79,12 +102,19 @@ pub fn convert(swf: &swf::Swf, opts: &Options) -> Result<Output> {
     let chars = Characters::collect(version, &swf.tags);
     let scripts = Scripts::collect(&swf.tags);
     let stage = *swf.header.stage_size();
-    let scale = target_scale(&stage);
+    let screen = screen_size(&stage, opts);
+    let scale = target_scale(&stage, screen);
+    let detail = if opts.detail.is_finite() && opts.detail > 0.0 {
+        opts.detail
+    } else {
+        1.0
+    };
     let mut c = Conv {
         chars: &chars,
         scripts: &scripts,
         a: Assets::default(),
-        tol_twips: opts.tolerance_px * 20.0 / scale,
+        tol_twips: opts.tolerance_px * 20.0 / (scale * detail),
+        detail,
         min_stroke: 20.0 / scale,
         bitmaps: HashMap::new(),
         decoded: HashMap::new(),
@@ -101,6 +131,7 @@ pub fn convert(swf: &swf::Swf, opts: &Options) -> Result<Output> {
     c.a.swf_version = version as u16;
     c.a.background = u32::from_le_bytes([bg.r, bg.g, bg.b, 255]);
     c.a.target_scale = scale;
+    c.a.screen = screen;
     c.a.swf_size = swf.header.uncompressed_len().max(0) as u32;
     let max_id = chars.map.keys().next_back().copied().unwrap_or(0) as usize;
     c.a.chars = vec![CharEntry::default(); max_id + 1];
@@ -489,7 +520,7 @@ impl<'a> Conv<'a> {
     fn bitmap(&mut self, id: u16, repeat: bool) -> Option<&BitmapEntry> {
         if !self.bitmaps.contains_key(&(id, repeat)) {
             let img = self.decode_bitmap(id)?;
-            let conv = bitmaps::convert(&img, self.a.target_scale, repeat);
+            let conv = bitmaps::convert(&img, self.a.target_scale * self.detail, repeat);
             let first_texture = self.a.textures.len() as u32;
             for t in &conv.tiles {
                 self.add_texture(&t.texture);
@@ -511,7 +542,8 @@ impl<'a> Conv<'a> {
             0
         } else {
             let hi = self.scales.get(&owner).map_or(1.0, |s| s.1);
-            let screen = 32768.0 / 20.0 * matrix_scale(&g.matrix) * self.a.target_scale * hi;
+            let screen =
+                32768.0 / 20.0 * matrix_scale(&g.matrix) * self.a.target_scale * self.detail * hi;
             gradients::radial_size(screen)
         };
         if let Some(v) = self.gradient_cache.get(&(key.clone(), size)) {
@@ -1214,6 +1246,27 @@ pub fn cxform8(c: &swf::ColorTransform) -> [i16; 8] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn stage(w: f64, h: f64) -> swf::Rectangle<swf::Twips> {
+        swf::Rectangle {
+            x_min: swf::Twips::ZERO,
+            y_min: swf::Twips::ZERO,
+            x_max: swf::Twips::from_pixels(w),
+            y_max: swf::Twips::from_pixels(h),
+        }
+    }
+
+    #[test]
+    fn screen_and_scale_per_target() {
+        let st = stage(550.0, 400.0);
+        let psp = Options::default();
+        assert_eq!(screen_size(&st, &psp), (480, 272));
+        assert_eq!(target_scale(&st, (480, 272)), 272.0 / 400.0);
+        let pc = crate::targets::Target::Desktop.options(None);
+        assert_eq!(screen_size(&st, &pc), (550, 400));
+        assert_eq!(target_scale(&st, (550, 400)), 1.0);
+        assert_eq!(screen_size(&stage(9000.0, 0.4), &pc), (4096, 1));
+    }
 
     #[test]
     fn split_keeps_small_meshes_whole_and_splits_big_ones() {

@@ -1,15 +1,18 @@
-/* OpenGL 2.1 (fixed function) backend for the PC target. Mirrors what the GE can do:
- * vertex colours or a modulated texture, four blend equations, stencil masks. */
+/* OpenGL 2.1 / OpenGL ES 1.1 (fixed function) backend for the PC and Android targets.
+ * Mirrors what the GE can do: vertex colours or a modulated texture, four blend
+ * equations, stencil masks. */
 #include "render.h"
 
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_opengl.h>
+#include "plat_gl.h"
 
 #include <stdlib.h>
 #include <string.h>
 
 #ifndef GL_CLAMP_TO_EDGE
 #define GL_CLAMP_TO_EDGE 0x812F
+#endif
+#ifndef APIENTRY
+#define APIENTRY GL_APIENTRY
 #endif
 
 static GLuint *g_tex;
@@ -20,18 +23,20 @@ static size_t g_scratch_cap;
 
 /* Blend layers need framebuffer objects (GL 3.0 / ARB_framebuffer_object) and
  * glBlendFuncSeparate (GL 1.4), both loaded at init; without them layers are off. */
-static PFNGLBLENDFUNCSEPARATEPROC p_glBlendFuncSeparate;
-static PFNGLGENFRAMEBUFFERSPROC p_glGenFramebuffers;
-static PFNGLDELETEFRAMEBUFFERSPROC p_glDeleteFramebuffers;
-static PFNGLBINDFRAMEBUFFERPROC p_glBindFramebuffer;
-static PFNGLFRAMEBUFFERTEXTURE2DPROC p_glFramebufferTexture2D;
-static PFNGLCHECKFRAMEBUFFERSTATUSPROC p_glCheckFramebufferStatus;
-static PFNGLGENRENDERBUFFERSPROC p_glGenRenderbuffers;
-static PFNGLDELETERENDERBUFFERSPROC p_glDeleteRenderbuffers;
-static PFNGLBINDRENDERBUFFERPROC p_glBindRenderbuffer;
-static PFNGLRENDERBUFFERSTORAGEPROC p_glRenderbufferStorage;
-static PFNGLFRAMEBUFFERRENDERBUFFERPROC p_glFramebufferRenderbuffer;
+/* Own pointer types: the desktop and ES headers name them differently (…OESPROC). */
+static void(APIENTRY *p_glBlendFuncSeparate)(GLenum, GLenum, GLenum, GLenum);
+static void(APIENTRY *p_glGenFramebuffers)(GLsizei, GLuint *);
+static void(APIENTRY *p_glDeleteFramebuffers)(GLsizei, const GLuint *);
+static void(APIENTRY *p_glBindFramebuffer)(GLenum, GLuint);
+static void(APIENTRY *p_glFramebufferTexture2D)(GLenum, GLenum, GLenum, GLuint, GLint);
+static GLenum(APIENTRY *p_glCheckFramebufferStatus)(GLenum);
+static void(APIENTRY *p_glGenRenderbuffers)(GLsizei, GLuint *);
+static void(APIENTRY *p_glDeleteRenderbuffers)(GLsizei, const GLuint *);
+static void(APIENTRY *p_glBindRenderbuffer)(GLenum, GLuint);
+static void(APIENTRY *p_glRenderbufferStorage)(GLenum, GLenum, GLsizei, GLsizei);
+static void(APIENTRY *p_glFramebufferRenderbuffer)(GLenum, GLenum, GLenum, GLuint);
 static bool g_layers_ok;
+static float g_screen_w = PLAT_SCREEN_W, g_screen_h = PLAT_SCREEN_H; /* logical screen of the movie */
 
 #define MAX_LAYERS 4
 typedef struct {
@@ -43,20 +48,20 @@ static gl_layer g_layers[MAX_LAYERS];
 static int g_layer_depth;
 static GLint g_viewport[4]; /* viewport of the window framebuffer, captured per frame */
 
+/* Every p_gl* pointer has the size and representation of SDL_FunctionPointer. */
+static bool load_proc(SDL_FunctionPointer *dst, const char *name)
+{
+    *dst = SDL_GL_GetProcAddress(name);
+    return *dst != NULL;
+}
+
 static void load_gl_procs(void)
 {
-#define LOAD(name, T) (p_##name = (T)SDL_GL_GetProcAddress(#name)) != NULL
-    g_layers_ok = LOAD(glBlendFuncSeparate, PFNGLBLENDFUNCSEPARATEPROC) &&
-                  LOAD(glGenFramebuffers, PFNGLGENFRAMEBUFFERSPROC) &&
-                  LOAD(glDeleteFramebuffers, PFNGLDELETEFRAMEBUFFERSPROC) &&
-                  LOAD(glBindFramebuffer, PFNGLBINDFRAMEBUFFERPROC) &&
-                  LOAD(glFramebufferTexture2D, PFNGLFRAMEBUFFERTEXTURE2DPROC) &&
-                  LOAD(glCheckFramebufferStatus, PFNGLCHECKFRAMEBUFFERSTATUSPROC) &&
-                  LOAD(glGenRenderbuffers, PFNGLGENRENDERBUFFERSPROC) &&
-                  LOAD(glDeleteRenderbuffers, PFNGLDELETERENDERBUFFERSPROC) &&
-                  LOAD(glBindRenderbuffer, PFNGLBINDRENDERBUFFERPROC) &&
-                  LOAD(glRenderbufferStorage, PFNGLRENDERBUFFERSTORAGEPROC) &&
-                  LOAD(glFramebufferRenderbuffer, PFNGLFRAMEBUFFERRENDERBUFFERPROC);
+#define LOAD(name) load_proc((SDL_FunctionPointer *)&p_##name, PLAT_GL_EXT_NAME(name))
+    g_layers_ok = LOAD(glBlendFuncSeparate) && LOAD(glGenFramebuffers) && LOAD(glDeleteFramebuffers) &&
+                  LOAD(glBindFramebuffer) && LOAD(glFramebufferTexture2D) && LOAD(glCheckFramebufferStatus) &&
+                  LOAD(glGenRenderbuffers) && LOAD(glDeleteRenderbuffers) && LOAD(glBindRenderbuffer) &&
+                  LOAD(glRenderbufferStorage) && LOAD(glFramebufferRenderbuffer);
 #undef LOAD
     if (!g_layers_ok) plat_log("render: no framebuffer objects; blend modes are applied per shape");
 }
@@ -192,10 +197,11 @@ void swf_render_shutdown(void)
 
 void swf_render_begin(const swf_assets *a)
 {
-    (void)a;
+    g_screen_w = a->screen_w;
+    g_screen_h = a->screen_h;
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    glOrtho(0, PLAT_SCREEN_W, PLAT_SCREEN_H, 0, -1, 1);
+    glOrtho(0, g_screen_w, g_screen_h, 0, -1, 1);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     glDisable(GL_DEPTH_TEST);
@@ -295,10 +301,10 @@ void swf_render_shape(const swf_assets *a, uint32_t shape, const swf_matrix *m, 
             }
             glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
             glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_REPLACE);
-            glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB, GL_PRIMARY_COLOR);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, GL_PRIMARY_COLOR);
             glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_ALPHA, GL_MODULATE);
-            glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_ALPHA, GL_TEXTURE);
-            glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE1_ALPHA, GL_PRIMARY_COLOR);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_ALPHA, GL_TEXTURE);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC1_ALPHA, GL_PRIMARY_COLOR);
             float add[3];
             for (int k = 0; k < 3; k++) add[k] = cx->add[k] > 0 ? cx->add[k] / 255.0f : 0.0f;
             glColor4f(add[0], add[1], add[2], cx->mul[3]);
@@ -312,6 +318,22 @@ void swf_render_shape(const swf_assets *a, uint32_t shape, const swf_matrix *m, 
     glDisable(GL_TEXTURE_2D);
 }
 
+/* Quad as a triangle fan (no GL_QUADS or glBegin on ES); uv may be NULL. */
+static void draw_quad(const GLfloat xy[8], const GLfloat *uv)
+{
+    glDisableClientState(GL_COLOR_ARRAY);
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glVertexPointer(2, GL_FLOAT, 0, xy);
+    if (uv) {
+        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+        glTexCoordPointer(2, GL_FLOAT, 0, uv);
+    } else {
+        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    }
+    glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+}
+
 void swf_render_rect(const swf_matrix *m, const int32_t r[4], uint32_t rgba, const swf_cxform *cx)
 {
     uint8_t in[4] = {(uint8_t)rgba, (uint8_t)(rgba >> 8), (uint8_t)(rgba >> 16), (uint8_t)(rgba >> 24)}, c[4];
@@ -320,12 +342,9 @@ void swf_render_rect(const swf_matrix *m, const int32_t r[4], uint32_t rgba, con
     glDisable(GL_TEXTURE_2D);
     set_blend(0);
     glColor4ub(c[0], c[1], c[2], c[3]);
-    glBegin(GL_QUADS);
-    glVertex2f((float)r[0], (float)r[1]);
-    glVertex2f((float)r[2], (float)r[1]);
-    glVertex2f((float)r[2], (float)r[3]);
-    glVertex2f((float)r[0], (float)r[3]);
-    glEnd();
+    const GLfloat xy[8] = {(float)r[0], (float)r[1], (float)r[2], (float)r[1],
+                           (float)r[2], (float)r[3], (float)r[0], (float)r[3]};
+    draw_quad(xy, NULL);
 }
 
 void swf_render_glyph_quad(const swf_assets *a, const swf_matrix *m, const float src[4], const float dst[4],
@@ -343,12 +362,10 @@ void swf_render_glyph_quad(const swf_assets *a, const swf_matrix *m, const float
     glColor4ub(c[0], c[1], c[2], c[3]);
     float u0 = src[0] / t->width, v0 = src[1] / t->height;
     float u1 = (src[0] + src[2]) / t->width, v1 = (src[1] + src[3]) / t->height;
-    glBegin(GL_QUADS);
-    glTexCoord2f(u0, v0); glVertex2f(dst[0], dst[1]);
-    glTexCoord2f(u1, v0); glVertex2f(dst[0] + dst[2], dst[1]);
-    glTexCoord2f(u1, v1); glVertex2f(dst[0] + dst[2], dst[1] + dst[3]);
-    glTexCoord2f(u0, v1); glVertex2f(dst[0], dst[1] + dst[3]);
-    glEnd();
+    const GLfloat uv[8] = {u0, v0, u1, v0, u1, v1, u0, v1};
+    const GLfloat xy[8] = {dst[0], dst[1], dst[0] + dst[2], dst[1], dst[0] + dst[2], dst[1] + dst[3],
+                           dst[0], dst[1] + dst[3]};
+    draw_quad(xy, uv);
     glDisable(GL_TEXTURE_2D);
 }
 
@@ -409,7 +426,7 @@ static bool layer_alloc(gl_layer *l, GLint w, GLint h)
         glGenTextures(1, &l->tex);
     }
     glBindTexture(GL_TEXTURE_2D, l->tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -420,7 +437,9 @@ static bool layer_alloc(gl_layer *l, GLint w, GLint h)
     p_glBindRenderbuffer(GL_RENDERBUFFER, 0);
     p_glBindFramebuffer(GL_FRAMEBUFFER, l->fbo);
     p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, l->tex, 0);
-    p_glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, l->rb);
+    /* Packed depth-stencil on both attachment points (GL_DEPTH_STENCIL_ATTACHMENT is not on ES). */
+    p_glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, l->rb);
+    p_glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, l->rb);
     bool ok = p_glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
     l->w = ok ? w : 0;
     l->h = ok ? h : 0;
@@ -480,18 +499,16 @@ void swf_render_layer_end(uint8_t blend)
     glBindTexture(GL_TEXTURE_2D, l->tex);
     glColor4f(1, 1, 1, 1);
     /* Texture rows start at the bottom of the viewport; the projection puts y = 0 at the top. */
-    glBegin(GL_QUADS);
-    glTexCoord2f(0, 1); glVertex2f(0, 0);
-    glTexCoord2f(1, 1); glVertex2f((float)PLAT_SCREEN_W, 0);
-    glTexCoord2f(1, 0); glVertex2f((float)PLAT_SCREEN_W, (float)PLAT_SCREEN_H);
-    glTexCoord2f(0, 0); glVertex2f(0, (float)PLAT_SCREEN_H);
-    glEnd();
+    const GLfloat uv[8] = {0, 1, 1, 1, 1, 0, 0, 0};
+    const GLfloat xy[8] = {0, 0, g_screen_w, 0, g_screen_w, g_screen_h, 0, g_screen_h};
+    draw_quad(xy, uv);
     glDisable(GL_TEXTURE_2D);
     set_blend(0);
 }
 
-bool swf_render_read_rgb(uint8_t *rgb)
+bool swf_render_read_rgb(uint8_t *rgb, int w, int h)
 {
+    if (w <= 0 || h <= 0) return false;
     GLint vp[4];
     glGetIntegerv(GL_VIEWPORT, vp);
     if (vp[2] <= 0 || vp[3] <= 0) return false;
@@ -500,11 +517,11 @@ bool swf_render_read_rgb(uint8_t *rgb)
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glReadPixels(vp[0], vp[1], vp[2], vp[3], GL_RGBA, GL_UNSIGNED_BYTE, full);
     bool ok = glGetError() == GL_NO_ERROR;
-    for (int y = 0; ok && y < PLAT_SCREEN_H; y++) {
-        int sy = vp[3] - 1 - (int)((y + 0.5f) * vp[3] / PLAT_SCREEN_H);
-        for (int x = 0; x < PLAT_SCREEN_W; x++) {
-            int sx = (int)((x + 0.5f) * vp[2] / PLAT_SCREEN_W);
-            memcpy(rgb + (y * PLAT_SCREEN_W + x) * 3, full + ((size_t)sy * vp[2] + sx) * 4, 3);
+    for (int y = 0; ok && y < h; y++) {
+        int sy = vp[3] - 1 - (int)((y + 0.5f) * vp[3] / h);
+        for (int x = 0; x < w; x++) {
+            int sx = (int)((x + 0.5f) * vp[2] / w);
+            memcpy(rgb + ((size_t)y * w + x) * 3, full + ((size_t)sy * vp[2] + sx) * 4, 3);
         }
     }
     free(full);

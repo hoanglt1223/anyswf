@@ -562,11 +562,24 @@ plat_result swf_assets_parse(swf_assets *out, const void *data, size_t size)
     out->background = rd32(f + 36);
     out->target_scale = rdf(f + 40);
     out->swf_size = rd32(f + 44);
+    out->screen_w = rd16(f + 48);
+    out->screen_h = rd16(f + 50);
+    if (out->screen_w == 0 && out->screen_h == 0) {
+        out->screen_w = PLAT_SCREEN_W;
+        out->screen_h = PLAT_SCREEN_H;
+    }
     if (!(out->target_scale > 0.0f && out->target_scale < 1000.0f) || out->stage[2] <= out->stage[0] ||
-        out->stage[3] <= out->stage[1]) {
+        out->stage[3] <= out->stage[1] || out->screen_w == 0 || out->screen_h == 0 ||
+        out->screen_w > PLAT_SCREEN_MAX || out->screen_h > PLAT_SCREEN_MAX) {
         plat_log("assets: bad stage geometry");
         return PLAT_ERR_INVALID;
     }
+#ifdef __PSP__
+    if (out->screen_w != PLAT_SCREEN_W || out->screen_h != PLAT_SCREEN_H) {
+        plat_log("assets: converted for a %ux%u screen; convert with --target psp", out->screen_w, out->screen_h);
+        return PLAT_ERR_INVALID;
+    }
+#endif
     if (out->frame_rate <= 0.0f) out->frame_rate = 12.0f;
 
     bool ok = find_block(&c, "STRS", &c.strs) && find_block(&c, "DATA", &c.data);

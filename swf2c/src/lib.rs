@@ -9,8 +9,10 @@ pub mod device_font;
 pub mod gradients;
 pub mod morph;
 pub mod parse;
+pub mod pipeline;
 pub mod scripts;
 pub mod sounds;
+pub mod targets;
 pub mod tessellate;
 pub mod text;
 

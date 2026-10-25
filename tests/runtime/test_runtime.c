@@ -171,6 +171,26 @@ static void test_parse_valid(void)
     swf_aligned_free(f);
 }
 
+static void test_screen_size(void)
+{
+    size_t size;
+    uint8_t *f = file_copy(&size);
+    swf_assets a;
+    CHECK(swf_assets_parse(&a, f, size) == PLAT_OK);
+    CHECK(a.screen_w == PLAT_SCREEN_W && a.screen_h == PLAT_SCREEN_H); /* 0x0 in the header */
+    swf_matrix psp = swf_movie_stage_matrix(&a);
+    swf_assets_free(&a);
+
+    f[48] = 1000 & 0xFF, f[49] = 1000 >> 8, f[50] = 600 & 0xFF, f[51] = 600 >> 8;
+    CHECK(swf_assets_parse(&a, f, size) == PLAT_OK);
+    CHECK(a.screen_w == 1000 && a.screen_h == 600);
+    swf_matrix pc = swf_movie_stage_matrix(&a);
+    CHECK(pc.a == psp.a && pc.tx - psp.tx == (1000 - PLAT_SCREEN_W) / 2.0f &&
+          pc.ty - psp.ty == (600 - PLAT_SCREEN_H) / 2.0f);
+    swf_assets_free(&a);
+    swf_aligned_free(f);
+}
+
 static void expect_reject(const char *what, void (*corrupt)(uint8_t *f, size_t *size))
 {
     size_t size;
@@ -218,8 +238,22 @@ static void block_outside(uint8_t *f, size_t *s)
     f[64 + 1 * 16 + 9] = 0x7F; /* DATA size huge */
 }
 
+static void screen_too_big(uint8_t *f, size_t *s)
+{
+    (void)s;
+    f[48] = 0x00, f[49] = 0x20; /* 8192 wide */
+    f[50] = 100;
+}
+static void screen_half_zero(uint8_t *f, size_t *s)
+{
+    (void)s;
+    f[48] = 100; /* 100 x 0 */
+}
+
 static void test_parse_rejects_corruption(void)
 {
+    expect_reject("screen larger than PLAT_SCREEN_MAX", screen_too_big);
+    expect_reject("screen with a zero side", screen_half_zero);
     expect_reject("magic", bad_magic);
     expect_reject("version", bad_version);
     expect_reject("truncated file", truncated);
@@ -297,6 +331,7 @@ static void test_transforms(void)
 int main(void)
 {
     test_parse_valid();
+    test_screen_size();
     test_parse_rejects_corruption();
     test_timeline();
     test_transforms();

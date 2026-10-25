@@ -185,6 +185,8 @@ pub struct Assets {
     pub swf_version: u16,
     pub background: u32,
     pub target_scale: f32,
+    /// Logical screen size target_scale maps to; (0, 0) means 480x272.
+    pub screen: (u16, u16),
     /// Uncompressed SWF length (MovieClip.getBytesTotal on the root).
     pub swf_size: u32,
     pub chars: Vec<CharEntry>,
@@ -520,7 +522,9 @@ pub fn serialize(a: &Assets) -> Vec<u8> {
     o.u32(a.background);
     o.f32(a.target_scale);
     o.u32(a.swf_size);
-    for _ in 0..4 {
+    o.u16(a.screen.0);
+    o.u16(a.screen.1);
+    for _ in 0..3 {
         o.u32(0);
     }
     debug_assert_eq!(o.buf.len(), HEADER_SIZE);

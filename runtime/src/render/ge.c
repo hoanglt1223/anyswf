@@ -302,8 +302,10 @@ void swf_render_layer_end(uint8_t blend)
     (void)blend;
 }
 
-bool swf_render_read_rgb(uint8_t *rgb)
+bool swf_render_read_rgb(uint8_t *rgb, int w, int h)
 {
     (void)rgb;
+    (void)w;
+    (void)h;
     return false;
 }
