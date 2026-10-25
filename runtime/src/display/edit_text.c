@@ -23,7 +23,7 @@ static uint32_t next_cp(const char **s)
 }
 
 /* Strips tags, turns <br> and </p> into line breaks and decodes the basic entities. */
-static void html_to_text(const char *in, char *out, size_t cap)
+void swf_html_to_text(const char *in, char *out, size_t cap)
 {
     size_t n = 0;
     while (*in && n + 4 < cap) {
@@ -102,26 +102,21 @@ static void draw_char(const face *fc, const swf_matrix *wm, float x, float y, ui
     swf_render_glyph_quad(fc->a, wm, src, dst, rgba, cx);
 }
 
-void swf_render_edit_text(swf_movie *m, const swf_dobj *o, const swf_matrix *wm, const swf_cxform *cx)
+/* Lays the text out; draws it when `wm` is set, and reports the extent of the text in
+ * twips (widest line, total line height). */
+static bool layout(swf_movie *m, const swf_dobj *o, const swf_matrix *wm, const swf_cxform *cx, float *out_w,
+                   float *out_h)
 {
     const swf_assets *a = m->assets;
-    const swf_edit_text *e = &a->edits[o->index];
-    if (e->flags & ET_BORDER) {
-        swf_render_rect(wm, e->bounds, 0xFFFFFFFFu, cx);
-        int32_t b = 20;
-        int32_t r[4][4] = {{e->bounds[0], e->bounds[1], e->bounds[2], e->bounds[1] + b},
-                           {e->bounds[0], e->bounds[3] - b, e->bounds[2], e->bounds[3]},
-                           {e->bounds[0], e->bounds[1], e->bounds[0] + b, e->bounds[3]},
-                           {e->bounds[2] - b, e->bounds[1], e->bounds[2], e->bounds[3]}};
-        for (int k = 0; k < 4; k++) swf_render_rect(wm, r[k], 0xFF000000u, cx);
-    }
+    const swf_edit_text *e = swf_dobj_edit(m, o);
+    *out_w = *out_h = 0;
     const char *src = o->text ? o->text : e->initial_text;
     static char buf[MAX_TEXT];
     if (e->flags & ET_HTML) {
-        html_to_text(src, buf, sizeof buf);
+        swf_html_to_text(src, buf, sizeof buf);
         src = buf;
     }
-    if (!*src) return;
+    if (!*src) return true;
 
     face fc = {a, NULL, 1, 0, 0};
     const swf_char *fch = swf_assets_char(a, e->font_id);
@@ -139,7 +134,7 @@ void swf_render_edit_text(swf_movie *m, const swf_dobj *o, const swf_matrix *wm,
         fc.line_h = e->height * 1.15f + e->leading;
     } else {
         swf_warn_once(m, SWF_WARN_EDIT_TEXT, "text: no font available for device text");
-        return;
+        return false;
     }
 
     float left = (float)(e->bounds[0] + GUTTER + e->left_margin);
@@ -150,6 +145,8 @@ void swf_render_edit_text(swf_movie *m, const swf_dobj *o, const swf_matrix *wm,
     float y = e->bounds[1] + GUTTER + fc.ascent;
     const char *p = src;
     bool first_line = true;
+    float max_w = 0;
+    int lines = 0;
     while (*p) {
         /* Find the end of the line: hard break, or the last space that fits when wrapping. */
         const char *line = p, *q = p, *brk = NULL, *end = NULL;
@@ -170,13 +167,17 @@ void swf_render_edit_text(swf_movie *m, const swf_dobj *o, const swf_matrix *wm,
         }
         if (!end) end = q;
         float lw = end == q ? w : (brk && end == brk ? w_at_brk : w);
-        float x = left + (first_line ? e->indent : 0);
-        if (e->align == 1) x = right - lw;
-        else if (e->align == 2) x = left + (width - lw) * 0.5f;
-        for (const char *s = line; s < end;) {
-            uint32_t cp = next_cp(&s);
-            draw_char(&fc, wm, x, y, cp, e->color, cx);
-            x += advance(&fc, cp);
+        if (lw > max_w) max_w = lw;
+        lines++;
+        if (wm) {
+            float x = left + (first_line ? e->indent : 0);
+            if (e->align == 1) x = right - lw;
+            else if (e->align == 2) x = left + (width - lw) * 0.5f;
+            for (const char *s = line; s < end;) {
+                uint32_t cp = next_cp(&s);
+                draw_char(&fc, wm, x, y, cp, e->color, cx);
+                x += advance(&fc, cp);
+            }
         }
         p = end;
         if (*p == ' ' && end != q) p++;
@@ -185,6 +186,38 @@ void swf_render_edit_text(swf_movie *m, const swf_dobj *o, const swf_matrix *wm,
         if (!multiline && !wrap) break;
         y += fc.line_h;
         first_line = false;
-        if (y - fc.ascent > e->bounds[3]) break;
+        if (wm && y - fc.ascent > e->bounds[3]) break;
     }
+    *out_w = max_w;
+    *out_h = lines ? fc.line_h * (float)(lines - 1) + fc.ascent + (fc.line_h - fc.ascent - e->leading) : 0;
+    return true;
+}
+
+void swf_render_edit_text(swf_movie *m, const swf_dobj *o, const swf_matrix *wm, const swf_cxform *cx)
+{
+    const swf_edit_text *e = swf_dobj_edit(m, o);
+    if (e->background) swf_render_rect(wm, e->bounds, e->background_color, cx);
+    if (e->border) {
+        int32_t b = 20;
+        int32_t r[4][4] = {{e->bounds[0], e->bounds[1], e->bounds[2], e->bounds[1] + b},
+                           {e->bounds[0], e->bounds[3] - b, e->bounds[2], e->bounds[3]},
+                           {e->bounds[0], e->bounds[1], e->bounds[0] + b, e->bounds[3]},
+                           {e->bounds[2] - b, e->bounds[1], e->bounds[2], e->bounds[3]}};
+        for (int k = 0; k < 4; k++) swf_render_rect(wm, r[k], e->border_color, cx);
+    }
+    float w, h;
+    (void)layout(m, o, wm, cx, &w, &h);
+}
+
+bool swf_edit_text_measure(swf_movie *m, const swf_dobj *o, float *w, float *h)
+{
+    return layout(m, o, NULL, NULL, w, h);
+}
+
+const swf_edit_text *swf_dobj_edit(const swf_movie *m, const swf_dobj *o)
+{
+    if (o->edit) return o->edit;
+    static const swf_edit_text EMPTY = {{0, 0, 0, 0}, 0, 240, 0xFF000000u, 0, 0, 0, 0, 0, 0, 0, "", "",
+                                        false, false, 0xFFFFFFFFu, 0xFF000000u, 0};
+    return o->index < m->assets->edit_count ? &m->assets->edits[o->index] : &EMPTY;
 }

@@ -4,16 +4,7 @@
 #include <stdio.h>
 
 #define ARENA_VALUES (64 * 1024)
-#define QUEUE_MAX 4096
 
-typedef struct queued {
-    swf_obj *clip;
-    uint32_t script;
-} queued;
-
-/* Frame scripts queued by the timeline; run after each frame is fully built. */
-static queued g_queue[QUEUE_MAX];
-static uint32_t g_queue_head, g_queue_tail;
 static swf_vm *g_vm;
 
 static void default_trace(const char *utf8, void *user)
@@ -81,20 +72,20 @@ swf_ctx ctx_for_clip(swf_vm *vm, swf_dobj *clip)
     return c;
 }
 
-static void run_script(swf_vm *vm, swf_dobj *clip, uint32_t script)
+void vm_run_protected(swf_vm *vm, swf_dobj *clip, vm_task_fn fn, void *user)
 {
-    if (script >= vm->code->script_count || !vm->code->scripts[script]) return;
-    swf_ctx c = ctx_for_clip(vm, clip);
+    swf_ctx c = ctx_for_clip(vm, clip ? clip : clip_root(vm));
     jmp_buf jb;
     jmp_buf *saved_abort = vm->abort_jb;
     swf_try *saved_handler = vm->handler;
     int saved_depth = vm->call_depth;
     size_t saved_top = vm->arena_top;
     swf_obj *saved_caller = vm->caller;
+    bool saved_uncaught = vm->uncaught_set;
     vm->abort_jb = &jb;
     vm->handler = NULL;
     vm->uncaught_set = false;
-    if (setjmp(jb) == 0) (void)vm->code->scripts[script](&c);
+    if (setjmp(jb) == 0) fn(&c, user);
     if (vm->uncaught_set) {
         vm->uncaught_set = false;
         swf_str *s = to_string(&c, vm->uncaught);
@@ -106,6 +97,7 @@ static void run_script(swf_vm *vm, swf_dobj *clip, uint32_t script)
             free(u);
         }
     }
+    vm->uncaught_set = saved_uncaught;
     vm->abort_jb = saved_abort;
     vm->handler = saved_handler;
     vm->call_depth = saved_depth;
@@ -113,28 +105,102 @@ static void run_script(swf_vm *vm, swf_dobj *clip, uint32_t script)
     vm->caller = saved_caller;
 }
 
+static void script_task(swf_ctx *cx, void *user)
+{
+    uint32_t script = *(const uint32_t *)user;
+    (void)cx->vm->code->scripts[script](cx);
+}
+
+static void run_script(swf_vm *vm, swf_dobj *clip, uint32_t script)
+{
+    if (script >= vm->code->script_count || !vm->code->scripts[script]) return;
+    vm_run_protected(vm, clip, script_task, &script);
+}
+
 void swf_vm_on_action(swf_movie *m, swf_dobj *clip, uint32_t script, void *user)
 {
-    swf_vm *vm = user;
     (void)m;
-    if (g_queue_tail - g_queue_head >= QUEUE_MAX) {
-        vm_warn(vm, WARN_STACK, "avm1: frame script queue overflow; scripts dropped");
-        return;
+    vm_queue_script(user, clip, script, false);
+}
+
+static void method_task(swf_ctx *cx, void *user)
+{
+    const queued *q = user;
+    swf_val fn;
+    if (!obj_get_opt(cx, q->obj, q->name, true, &fn, NULL) || !is_function(fn)) return;
+    (void)func_call(cx, fn.u.o, swf_objv(q->obj), q->nargs, q->args, 1, false);
+}
+
+static void broadcast_task(swf_ctx *cx, void *user)
+{
+    const queued *q = user;
+    swf_val args[3] = {swf_strv(q->name), q->args[0], q->args[1]};
+    (void)obj_call_method(cx, q->obj, atom_ascii(cx->vm, "broadcastMessage"), 1u + q->nargs, args, false);
+}
+
+static void call_task(swf_ctx *cx, void *user)
+{
+    const queued *q = user;
+    (void)func_call(cx, q->obj, swf_objv(cx->vm->global), q->nargs, q->args, 1, false);
+}
+
+static void construct_task(swf_ctx *cx, void *user)
+{
+    const queued *q = user;
+    swf_vm *vm = cx->vm;
+    swf_dobj *d = q->clip->u.clip;
+    if (q->obj) {
+        swf_val proto = obj_get(cx, q->obj, vm->s.prototype);
+        if (proto.t == SWF_T_OBJ) obj_define(vm, q->clip, vm->s.proto, proto, ATTR_DONT_ENUM | ATTR_DONT_DELETE);
     }
-    g_queue[g_queue_tail % QUEUE_MAX] = (queued){clip_object(vm, clip), script};
-    g_queue_tail++;
+    /* onClipEvent(construct) handlers run before the class constructor. */
+    const swf_assets *a = vm->movie->assets;
+    for (uint32_t i = 0; i < d->clip_action_count; i++) {
+        const swf_clip_action *ca = &a->clip_actions[d->clip_action_first + i];
+        if ((ca->events & (1u << 18)) && ca->script < vm->code->script_count && vm->code->scripts[ca->script])
+            run_script(vm, d, ca->script);
+    }
+    if (q->obj) func_construct_on(cx, q->obj, q->clip, 0, NULL);
+}
+
+static bool queue_pop(swf_vm *vm, queued *out)
+{
+    for (int p = 0; p < Q_PRIORITIES; p++) {
+        if (vm->q_head[p] != vm->q_tail[p]) {
+            *out = vm->queue[p][vm->q_head[p]++];
+            if (vm->q_head[p] == vm->q_tail[p]) vm->q_head[p] = vm->q_tail[p] = 0;
+            return true;
+        }
+    }
+    return false;
 }
 
 void swf_vm_run_queue(swf_vm *vm)
 {
-    while (g_queue_head != g_queue_tail) {
-        queued q = g_queue[g_queue_head % QUEUE_MAX];
-        g_queue_head++;
-        if (q.clip->cls == OC_CLIP && q.clip->u.clip && !q.clip->u.clip->removed)
-            run_script(vm, q.clip->u.clip, q.script);
+    queued q;
+    while (queue_pop(vm, &q)) {
+        if (q.kind == QK_BROADCAST || q.kind == QK_CALL) {
+            vm_run_protected(vm, NULL, q.kind == QK_CALL ? call_task : broadcast_task, &q);
+            continue;
+        }
+        if (q.clip->cls != OC_CLIP || !q.clip->u.clip) continue;
+        swf_dobj *d = q.clip->u.clip;
+        if (d->removed && !q.unload) continue;
+        /* Unload handlers run on the removed clip, which stays allocated until the queue
+         * is drained (movie->hold_removed). */
+        bool was_removed = d->removed;
+        d->removed = false;
+        switch (q.kind) {
+        case QK_SCRIPT: run_script(vm, d, q.script); break;
+        case QK_METHOD: vm_run_protected(vm, d, method_task, &q); break;
+        case QK_CONSTRUCT: vm_run_protected(vm, d, construct_task, &q); break;
+        default: break;
+        }
+        if (q.clip->u.clip == d) d->removed = was_removed || d->removed;
     }
     /* Flash clears the global registers between frames (Ruffle `Avm1::clear`). */
     for (int i = 0; i < SWF_GLOBAL_REGS; i++) vm->regs[i] = swf_undef();
+    swf_movie_flush_removed(vm->movie);
 }
 
 void swf_vm_run_init_actions(swf_vm *vm)
@@ -178,8 +244,12 @@ swf_vm *swf_vm_new(swf_movie *movie, const swf_game_code *code)
     vm->rng = 0x2545F491u;
     vm->start_us = plat_time_us();
     vm->threshold = 1024 * 1024;
+    swf_config_defaults(&vm->cfg);
+    vm->mouse_visible = true;
+    vm->cursor_x = movie->assets->screen_w / 2.0f;
+    vm->cursor_y = movie->assets->screen_h / 2.0f;
+    vm->next_timer_id = 1;
     g_vm = vm;
-    g_queue_head = g_queue_tail = 0;
 
     jmp_buf jb;
     vm->abort_jb = &jb;
@@ -246,6 +316,21 @@ swf_vm *swf_vm_new(swf_movie *movie, const swf_game_code *code)
     builtins_error(vm);
     builtins_global(vm);
     clip_init_builtins(vm);
+    vm->classes = obj_new_bare(vm);
+    vm->timer_objs = obj_new_bare(vm);
+    vm->shared_objects = obj_new_bare(vm);
+    vm->voices = obj_new_bare(vm);
+    builtins_broadcaster(vm);
+    builtins_movieclip(vm);
+    builtins_button(vm);
+    builtins_key(vm);
+    builtins_mouse(vm);
+    builtins_timers(vm);
+    builtins_textfield(vm);
+    builtins_date(vm);
+    builtins_sound(vm);
+    builtins_sharedobject(vm);
+    builtins_stage(vm);
 
     for (uint32_t i = 0; i < code->atom_count; i++)
         code->atoms[i] = atom(vm, str_from_utf8(vm, code->atom_utf8[i], code->atom_bytes[i]));
@@ -254,6 +339,9 @@ swf_vm *swf_vm_new(swf_movie *movie, const swf_game_code *code)
     swf_dobj_free_hook = dobj_freed;
     movie->on_action = swf_vm_on_action;
     movie->on_warning = movie_warning;
+    movie->on_event = vm_display_event;
+    movie->on_sound = sound_timeline;
+    movie->hold_removed = true;
     movie->user = vm;
     return vm;
 }
@@ -269,6 +357,8 @@ static void clear_script_objects(swf_dobj *d)
 void swf_vm_free(swf_vm *vm)
 {
     if (!vm) return;
+    if (vm->global) swf_vm_flush_saves(vm);
+    if (vm->mixer) sound_stop_all(vm);
     if (g_vm == vm) {
         swf_dobj_free_hook = NULL;
         g_vm = NULL;
@@ -279,9 +369,15 @@ void swf_vm_free(swf_vm *vm)
             clear_script_objects(vm->movie->root->children);
         }
         vm->movie->on_action = NULL;
+        vm->movie->on_event = NULL;
+        vm->movie->on_sound = NULL;
+        vm->movie->hold_removed = false;
+        swf_movie_flush_removed(vm->movie);
         vm->movie->user = NULL;
     }
     gc_free_all(vm);
+    for (int p = 0; p < Q_PRIORITIES; p++) free(vm->queue[p]);
+    free(vm->timers);
     free(vm->atoms);
     free(vm->arena);
     free(vm);

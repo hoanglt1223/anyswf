@@ -8,6 +8,11 @@
   tables (`runtime/src/avm1/casemap.c`) come from Ruffle's `wstr/src/tables.rs`.
 - **TIC-80** (MIT, Copyright (c) 2017 Vadim Grigoruk): the device-text bitmap font
   in `swf2c/src/device_font.rs` is TIC-80's system font (`src/core/font.inl`).
+- **minimp3** (CC0-1.0, lieff/minimp3 commit `ea99364f61c14656440e8d77e9c233ccf3124633`):
+  `runtime/third_party/minimp3/minimp3.h`, unmodified, decodes MP3 stream sounds in the
+  runtime mixer.
+- The runtime's Date, drawing-API path rules, timers, AsBroadcaster and clip-event order
+  follow Ruffle's `core/src` (MIT OR Apache-2.0); see the comments in `runtime/src/builtins/`.
 - **symphonia** 0.5.5 (MPL-2.0): used unmodified as a dependency for MP3 decoding.
 - Other crate dependencies (`lyon`, `jpeg-decoder`, `png`, `gif`, `flate2`, `toml`) are
   MIT OR Apache-2.0.

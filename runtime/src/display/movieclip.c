@@ -1,6 +1,7 @@
 #include "display_internal.h"
 
 #include "../render/render.h"
+#include "drawing.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -28,6 +29,8 @@ plat_result swf_movie_init(swf_movie *m, const swf_assets *a)
 
 void swf_movie_free(swf_movie *m)
 {
+    m->on_event = NULL;
+    m->hold_removed = false;
     m->deferring = false;
     swf_flush_graveyard(m);
     swf_dobj_free(m, m->root);
@@ -46,11 +49,14 @@ void swf_movie_advance(swf_movie *m)
     m->deferring = true;
     for (swf_dobj *c = m->exec_head; c;) {
         swf_dobj *next = c->exec_next;
-        if (!c->removed && c->playing && c->born_tick < m->tick && c->frame > 0) swf_clip_next_frame(m, c);
+        if (!c->removed && c->born_tick < m->tick && c->frame > 0) {
+            if (m->on_event) m->on_event(m, c, SWF_EV_ENTER_FRAME, m->user);
+            if (c->playing) swf_clip_next_frame(m, c);
+        }
         c = next;
     }
     m->deferring = false;
-    swf_flush_graveyard(m);
+    if (!m->hold_removed) swf_flush_graveyard(m);
 }
 
 int swf_movie_update(swf_movie *m, double dt, int max_frames)
@@ -77,6 +83,32 @@ swf_matrix swf_movie_stage_matrix(const swf_assets *a)
     m.tx = (a->screen_w - w) * 0.5f - a->stage[0] * s;
     m.ty = (a->screen_h - h) * 0.5f - a->stage[1] * s;
     return m;
+}
+
+swf_matrix swf_movie_view_matrix(const swf_movie *m)
+{
+    const swf_assets *a = m->assets;
+    if (m->scale_mode == SWF_SCALE_SHOW_ALL) return swf_movie_stage_matrix(a);
+    /* Assets are converted for "show all" (target_scale); the other modes rescale that. */
+    float sw = (float)(a->stage[2] - a->stage[0]), sh = (float)(a->stage[3] - a->stage[1]);
+    if (sw <= 0 || sh <= 0) return swf_movie_stage_matrix(a);
+    float sx, sy;
+    switch (m->scale_mode) {
+    case SWF_SCALE_EXACT_FIT:
+        sx = (float)a->screen_w / sw;
+        sy = (float)a->screen_h / sh;
+        break;
+    case SWF_SCALE_NO_BORDER:
+        sx = sy = ((float)a->screen_w / sw > (float)a->screen_h / sh) ? (float)a->screen_w / sw : (float)a->screen_h / sh;
+        break;
+    default: /* no scale */
+        sx = sy = 1.0f / 20.0f;
+        break;
+    }
+    swf_matrix r = {sx, 0, 0, sy, 0, 0};
+    r.tx = ((float)a->screen_w - sw * sx) * 0.5f - a->stage[0] * sx;
+    r.ty = ((float)a->screen_h - sh * sy) * 0.5f - a->stage[1] * sy;
+    return r;
 }
 
 typedef struct mask_entry {
@@ -184,6 +216,7 @@ static void render_obj(swf_movie *m, const swf_dobj *o, const swf_matrix *wm, co
         swf_render_shape(a, swf_assets_morph_shape(a, o->index, o->ratio), wm, wcx, blend, !as_mask);
         break;
     case SWF_CHAR_SPRITE:
+        if (o->drawing) swf_drawing_render(o->drawing, wm, wcx, blend, !as_mask);
         render_children(m, o->children, wm, wcx, blend, as_mask);
         break;
     case SWF_CHAR_BUTTON:
@@ -199,7 +232,7 @@ static void render_obj(swf_movie *m, const swf_dobj *o, const swf_matrix *wm, co
 
 void swf_movie_render(swf_movie *m)
 {
-    swf_matrix stage = swf_movie_stage_matrix(m->assets);
+    swf_matrix stage = swf_movie_view_matrix(m);
     swf_render_begin(m->assets);
     swf_matrix wm = swf_matrix_mul(&stage, &m->root->matrix);
     render_children(m, m->root->children, &wm, &m->root->cxform, 0, false);

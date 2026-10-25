@@ -18,9 +18,18 @@ static float rdf(const uint8_t *p)
     return f;
 }
 
+static const uint32_t EMPTY_FRAMES[2] = {0, 0};
+static const swf_sprite EMPTY_SPRITE = {1, EMPTY_FRAMES, NULL, 0, SWF_NONE};
+
+const swf_sprite *swf_clip_sprite(const swf_movie *m, const swf_dobj *clip)
+{
+    if (clip->index == SWF_EMPTY_SPRITE || clip->index >= m->assets->sprite_count) return &EMPTY_SPRITE;
+    return &m->assets->sprites[clip->index];
+}
+
 static const swf_sprite *sprite_of(const swf_movie *m, const swf_dobj *clip)
 {
-    return &m->assets->sprites[clip->index];
+    return swf_clip_sprite(m, clip);
 }
 
 uint32_t swf_clip_total_frames(const swf_movie *m, const swf_dobj *clip)
@@ -196,7 +205,7 @@ static void frame_sounds(swf_movie *m, swf_dobj *clip, uint32_t f)
         case SWF_CMD_REMOVE: p += 2; break;
         case SWF_CMD_ACTION: p += 4; break;
         case SWF_CMD_START_SOUND:
-            m->on_sound(m, clip, p, m->user);
+            m->on_sound(m, clip, p - 1, m->user);
             p += 16;
             break;
         case SWF_CMD_STREAM_BLOCK:
@@ -234,7 +243,7 @@ static void apply_frame(swf_movie *m, swf_dobj *clip, uint32_t f, bool live)
             break;
         case SWF_CMD_ACTION: p += 4; break;
         case SWF_CMD_START_SOUND:
-            if (live && m->on_sound) m->on_sound(m, clip, p, m->user);
+            if (live && m->on_sound) m->on_sound(m, clip, p - 1, m->user);
             p += 16;
             break;
         case SWF_CMD_STREAM_BLOCK:
@@ -249,6 +258,7 @@ static void apply_frame(swf_movie *m, swf_dobj *clip, uint32_t f, bool live)
 
 void swf_clip_enter_first_frame(swf_movie *m, swf_dobj *clip)
 {
+    if (m->on_event) m->on_event(m, clip, SWF_EV_PLACED, m->user);
     clip->frame = 1;
     apply_frame(m, clip, 0, true);
 }

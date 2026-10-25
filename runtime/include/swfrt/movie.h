@@ -40,6 +40,11 @@ enum swf_blend {
 };
 
 typedef struct swf_dobj swf_dobj;
+typedef struct swf_drawing swf_drawing; /* MovieClip drawing API content (display/drawing.h) */
+
+/* Sprite index of clips without a timeline (createEmptyMovieClip). */
+#define SWF_EMPTY_SPRITE SWF_NONE
+
 struct swf_dobj {
     swf_dobj *next;       /* sibling with the next higher depth */
     swf_dobj *parent;
@@ -56,6 +61,7 @@ struct swf_dobj {
     bool from_timeline;
     uint32_t place_frame; /* parent frame whose PlaceObject created this instance */
     const char *name;
+    char *name_owned;     /* set when script named or renamed the object; `name` points here */
     uint32_t clip_action_first, clip_action_count;
 
     /* Sprites */
@@ -70,6 +76,13 @@ struct swf_dobj {
 
     /* Text fields: current text (owned, UTF-8); NULL shows the initial text. */
     char *text;
+    /* Per-instance text record (owned): script-created fields and fields whose format
+     * was changed by script. NULL uses the asset's record. */
+    swf_edit_text *edit;
+    bool var_bound;       /* the text field's variable was initialised from its text */
+
+    /* Sprites: vector content drawn by script, below the children (owned). */
+    swf_drawing *drawing;
 
     /* Buttons */
     uint8_t button_state; /* SWF button state bit (1 up, 2 over, 4 down) */
@@ -77,8 +90,20 @@ struct swf_dobj {
     void *script_object;  /* AVM1 object bound to this display object, if any */
 };
 
+/* Display events reported to the script VM. */
+enum swf_display_event {
+    SWF_EV_PLACED = 1,      /* a sprite was created; its first frame is about to be built */
+    SWF_EV_ENTER_FRAME = 2, /* a sprite starts a new SWF frame (before its timeline steps) */
+    SWF_EV_REMOVED = 3      /* a sprite left the display list (once per sprite, children too) */
+};
+
+/* Stage scale modes (Stage.scaleMode); "show all" is the Flash default. */
+enum swf_scale_mode { SWF_SCALE_SHOW_ALL = 0, SWF_SCALE_EXACT_FIT, SWF_SCALE_NO_BORDER, SWF_SCALE_NO_SCALE };
+
 struct swf_movie;
+typedef void (*swf_event_fn)(struct swf_movie *m, swf_dobj *clip, int event, void *user);
 typedef void (*swf_action_fn)(struct swf_movie *m, swf_dobj *clip, uint32_t script, void *user);
+/* `cmd` points at a START_SOUND or STREAM_BLOCK command, opcode first. */
 typedef void (*swf_sound_fn)(struct swf_movie *m, swf_dobj *clip, const uint8_t *cmd, void *user);
 
 typedef struct swf_movie {
@@ -95,6 +120,11 @@ typedef struct swf_movie {
     swf_dobj *graveyard;
     /* Flash Player warnings that appear in trace output ("Warning: ..."). */
     void (*on_warning)(struct swf_movie *m, const char *msg, void *user);
+    swf_event_fn on_event;
+    /* Removed objects stay allocated (flagged `removed`) until swf_movie_flush_removed,
+     * so queued unload handlers can still run on them. */
+    bool hold_removed;
+    uint8_t scale_mode;   /* swf_scale_mode */
 } swf_movie;
 
 /* Called when a display object with a script object is destroyed (set by the VM). */
@@ -114,15 +144,47 @@ int64_t swf_clip_find_label(const swf_movie *m, const swf_dobj *clip, const char
 void swf_clip_play(swf_dobj *clip);
 void swf_clip_stop(swf_dobj *clip);
 uint32_t swf_clip_total_frames(const swf_movie *m, const swf_dobj *clip);
+/* Timeline of a sprite (an empty one-frame timeline for SWF_EMPTY_SPRITE). */
+const swf_sprite *swf_clip_sprite(const swf_movie *m, const swf_dobj *clip);
+/* Text record of an edit-text object (its own copy, else the asset's). */
+const swf_edit_text *swf_dobj_edit(const swf_movie *m, const swf_dobj *o);
 
 swf_dobj *swf_clip_child_at(swf_dobj *clip, int32_t depth);
 swf_dobj *swf_clip_child_named(swf_dobj *clip, const char *name, bool case_sensitive);
 /* Creates a display object for a character at a depth (replacing what was there). */
 swf_dobj *swf_clip_add_child(swf_movie *m, swf_dobj *clip, uint16_t char_id, int32_t depth);
 void swf_clip_remove_child(swf_movie *m, swf_dobj *clip, int32_t depth);
+/* Creates an object without a character: an empty sprite (SWF_CHAR_SPRITE) or a text
+ * field (SWF_CHAR_EDIT_TEXT, taking ownership of `edit`). Replaces what was at the depth. */
+swf_dobj *swf_clip_add_object(swf_movie *m, swf_dobj *clip, uint8_t kind, int32_t depth, swf_edit_text *edit);
+/* Two-step creation for script-made objects: create (char_id 0 makes an empty sprite or a
+ * text field of `kind`), adjust fields, then place (inserts and builds the first frame). */
+swf_dobj *swf_dobj_create(swf_movie *m, uint16_t char_id, uint8_t kind, int32_t depth);
+void swf_clip_place(swf_movie *m, swf_dobj *clip, swf_dobj *o);
+/* Unlinks a child without freeing it (to move it to another depth). */
+bool swf_clip_detach(swf_dobj *clip, swf_dobj *child);
+/* Gives an object a script-assigned instance name (copied). False when out of memory. */
+bool swf_dobj_set_name(swf_dobj *o, const char *utf8);
+/* Frees objects held back by hold_removed. */
+void swf_movie_flush_removed(swf_movie *m);
 
 /* Stage-to-screen transform: SWF "show all" scaling, centred. */
 swf_matrix swf_movie_stage_matrix(const swf_assets *a);
+/* Stage-to-screen transform for the movie's scale mode. */
+swf_matrix swf_movie_view_matrix(const swf_movie *m);
+/* World transform (root twips) of a display object, including its own matrix. */
+swf_matrix swf_dobj_world_matrix(const swf_dobj *o);
+bool swf_matrix_invert(const swf_matrix *m, swf_matrix *out);
+
+/* Extent of a text field's laid-out text in twips (TextField.textWidth/textHeight). */
+bool swf_edit_text_measure(swf_movie *m, const swf_dobj *o, float *w, float *h);
+
+/* Bounds (twips) of an object's content transformed by `m` (pass the object's own matrix
+ * for parent space). False when it has no content. */
+bool swf_dobj_bounds(const swf_movie *m, const swf_dobj *o, const swf_matrix *mat, float out[4]);
+/* Hit test of a point in root twips. `shape` tests the filled geometry, otherwise the
+ * bounding box. Invisible objects still hit (callers filter). */
+bool swf_dobj_hit(const swf_movie *m, const swf_dobj *o, float x, float y, bool shape);
 
 /* Draws the display tree through the active renderer. */
 void swf_movie_render(swf_movie *m);

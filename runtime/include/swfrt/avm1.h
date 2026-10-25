@@ -5,6 +5,7 @@
 
 #include <setjmp.h>
 
+#include "swfrt/config.h"
 #include "swfrt/movie.h"
 #include "swfrt/value.h"
 
@@ -17,6 +18,7 @@ extern "C" {
 
 typedef struct swf_scope swf_scope;
 typedef struct swf_ctx swf_ctx;
+typedef struct swf_mixer swf_mixer;
 
 typedef swf_val (*swf_code_fn)(swf_ctx *cx);
 
@@ -99,6 +101,37 @@ void swf_vm_collect(swf_vm *vm);
 typedef void (*swf_trace_fn)(const char *utf8, void *user);
 void swf_vm_set_trace(swf_vm *vm, swf_trace_fn fn, void *user);
 size_t swf_vm_live_bytes(const swf_vm *vm);
+
+/* Input for one display frame. */
+typedef struct swf_input {
+    uint32_t held;            /* PLAT_BTN_* bits, mapped to keys by anyswf.toml [keys] */
+    float stick_x, stick_y;   /* analog nub, -1..1: moves the cursor */
+    /* PC keyboard: Flash key codes held (plat_input.keys). While any is held, these are
+     * the key state and buttons are not mapped, since the keyboard also drives them. */
+    uint32_t keys[8];
+    /* PC mouse or touch, in screen pixels; takes over the cursor when it moves. */
+    bool has_pointer, pointer_down;
+    float pointer_x, pointer_y;
+    bool has_cursor;          /* scripted runs: put the cursor at cursor_x/y (screen pixels) */
+    float cursor_x, cursor_y;
+} swf_input;
+
+void swf_vm_set_config(swf_vm *vm, const swf_config *c);
+/* Clock for getTimer, intervals and Date-independent timing, in ms since the VM started.
+ * Players pass real time, or frame-derived time for deterministic headless runs. */
+void swf_vm_set_time(swf_vm *vm, uint64_t ms);
+/* Maps buttons to keys and the nub to the cursor, then fires key, mouse and button events. */
+void swf_vm_input(swf_vm *vm, const swf_input *in, double dt);
+/* Runs due setInterval/setTimeout callbacks. */
+void swf_vm_run_timers(swf_vm *vm);
+/* Per-frame bookkeeping after scripts ran: text-field variables, sound completion. */
+void swf_vm_after_frame(swf_vm *vm);
+/* Draws the cursor (when shown) over the frame. */
+void swf_vm_draw_overlay(swf_vm *vm);
+/* Audio output for Sound and timeline sounds; NULL plays nothing. */
+void swf_vm_set_mixer(swf_vm *vm, swf_mixer *mixer);
+/* Writes every SharedObject that has data (also done by swf_vm_free). */
+void swf_vm_flush_saves(swf_vm *vm);
 
 /* --- support for generated code ------------------------------------------------ */
 

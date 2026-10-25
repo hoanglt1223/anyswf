@@ -34,16 +34,31 @@ static bool scriptable(const swf_dobj *d)
     return d->kind == SWF_CHAR_SPRITE || d->kind == SWF_CHAR_BUTTON || d->kind == SWF_CHAR_EDIT_TEXT;
 }
 
+swf_obj *clip_new_object(swf_vm *vm, swf_dobj *d)
+{
+    swf_obj *proto = vm->clip_proto;
+    if (d->kind == SWF_CHAR_BUTTON && vm->button_proto) proto = vm->button_proto;
+    else if (d->kind == SWF_CHAR_EDIT_TEXT && vm->textfield_proto) proto = vm->textfield_proto;
+    else if (d->kind == SWF_CHAR_SPRITE) {
+        swf_obj *ctor = vm_registered_class(vm, d);
+        if (ctor) {
+            swf_prop *p = obj_own(vm, ctor, vm->s.prototype);
+            if (p && p->val.t == SWF_T_OBJ) proto = p->val.u.o;
+        }
+    }
+    swf_obj *o = obj_new_class(vm, proto, OC_CLIP);
+    o->u.clip = d;
+    d->script_object = o;
+    return o;
+}
+
 swf_obj *clip_object(swf_vm *vm, swf_dobj *d)
 {
     if (!d) return obj_new_bare(vm);
     /* Shapes and other graphics have no script object; Flash hands out the parent. */
     while (d && !scriptable(d) && d->parent) d = d->parent;
     if (d->script_object) return d->script_object;
-    swf_obj *o = obj_new_class(vm, vm->clip_proto, OC_CLIP);
-    o->u.clip = d;
-    d->script_object = o;
-    return o;
+    return clip_new_object(vm, d);
 }
 
 /* Decodes one UTF-8 sequence as a UTF-16 unit; characters outside the BMP never match
@@ -134,71 +149,11 @@ static double rotation_deg(const swf_matrix *m)
     return atan2(m->b, m->a) * 180.0 / PI;
 }
 
-/* Bounds of a display object's content in its own coordinate space (twips). */
-static bool local_bounds(swf_vm *vm, swf_dobj *d, const swf_matrix *m, double b[4])
-{
-    const swf_assets *a = vm->movie->assets;
-    bool any = false;
-    int32_t r[4];
-    bool have = false;
-    switch (d->kind) {
-    case SWF_CHAR_SHAPE:
-    case SWF_CHAR_TEXT:
-        memcpy(r, a->shapes[d->index].bounds, sizeof r);
-        have = true;
-        break;
-    case SWF_CHAR_MORPH:
-        memcpy(r, a->shapes[swf_assets_morph_shape(a, d->index, d->ratio)].bounds, sizeof r);
-        have = true;
-        break;
-    case SWF_CHAR_EDIT_TEXT:
-        memcpy(r, a->edits[d->index].bounds, sizeof r);
-        have = true;
-        break;
-    default:
-        break;
-    }
-    if (have) {
-        double xs[2] = {r[0], r[2]}, ys[2] = {r[1], r[3]};
-        for (int i = 0; i < 2; i++)
-            for (int j = 0; j < 2; j++) {
-                double x = m->a * xs[i] + m->c * ys[j] + m->tx;
-                double y = m->b * xs[i] + m->d * ys[j] + m->ty;
-                if (!any) {
-                    b[0] = b[2] = x;
-                    b[1] = b[3] = y;
-                    any = true;
-                } else {
-                    if (x < b[0]) b[0] = x;
-                    if (y < b[1]) b[1] = y;
-                    if (x > b[2]) b[2] = x;
-                    if (y > b[3]) b[3] = y;
-                }
-            }
-    }
-    for (swf_dobj *c = d->children; c; c = c->next) {
-        swf_matrix cm = swf_matrix_mul(m, &c->matrix);
-        double cb[4];
-        if (local_bounds(vm, c, &cm, cb)) {
-            if (!any) {
-                memcpy(b, cb, sizeof cb);
-                any = true;
-            } else {
-                if (cb[0] < b[0]) b[0] = cb[0];
-                if (cb[1] < b[1]) b[1] = cb[1];
-                if (cb[2] > b[2]) b[2] = cb[2];
-                if (cb[3] > b[3]) b[3] = cb[3];
-            }
-        }
-    }
-    return any;
-}
-
 static double extent(swf_vm *vm, swf_dobj *d, bool width)
 {
-    double b[4];
-    if (!local_bounds(vm, d, &d->matrix, b)) return 0;
-    double v = width ? b[2] - b[0] : b[3] - b[1];
+    float b[4];
+    if (!swf_dobj_bounds(vm->movie, d, &d->matrix, b)) return 0;
+    double v = width ? (double)b[2] - b[0] : (double)b[3] - b[1];
     return round(v) / 20.0;
 }
 
@@ -235,7 +190,6 @@ static int prop_index(const swf_str *name)
 swf_val clip_get_property_index(swf_ctx *cx, swf_dobj *d, int index)
 {
     swf_vm *vm = cx->vm;
-    const swf_assets *a = vm->movie->assets;
     switch (index) {
     case P_X: return swf_num(d->matrix.tx / 20.0);
     case P_Y: return swf_num(d->matrix.ty / 20.0);
@@ -244,7 +198,7 @@ swf_val clip_get_property_index(swf_ctx *cx, swf_dobj *d, int index)
     case P_CURRENTFRAME: return swf_num(d->kind == SWF_CHAR_SPRITE ? (d->frame ? d->frame : 1) : 1);
     case P_TOTALFRAMES:
     case P_FRAMESLOADED:
-        return swf_num(d->kind == SWF_CHAR_SPRITE ? a->sprites[d->index].frame_count : 1);
+        return swf_num(d->kind == SWF_CHAR_SPRITE ? swf_clip_sprite(vm->movie, d)->frame_count : 1);
     case P_ALPHA: return swf_num(d->cxform.mul[3] * 100.0);
     case P_VISIBLE: return swf_bool(d->visible);
     case P_WIDTH: return swf_num(extent(vm, d, true));
@@ -252,14 +206,23 @@ swf_val clip_get_property_index(swf_ctx *cx, swf_dobj *d, int index)
     case P_ROTATION: return swf_num(rotation_deg(&d->matrix));
     case P_TARGET: return swf_strv(target_path(vm, d));
     case P_NAME: return swf_strv(str_from_utf8(vm, d->name ? d->name : "", d->name ? strlen(d->name) : 0));
-    case P_DROPTARGET: return swf_strv(vm->s.empty);
+    case P_DROPTARGET:
+        /* What lies under the cursor besides this clip: valid while dragging and right
+         * after the drop, which is when scripts read it. */
+        return swf_strv(mouse_drop_target(vm, d));
     case P_URL: return swf_strv(vm->s.empty);
     case P_HIGHQUALITY: return swf_num(1);
     case P_FOCUSRECT: return swf_bool(true);
     case P_SOUNDBUFTIME: return swf_num(5);
     case P_QUALITY: return swf_strv(atom_ascii(vm, "HIGH"));
     case P_XMOUSE:
-    case P_YMOUSE: return swf_num(0);
+    case P_YMOUSE: {
+        swf_matrix w = swf_dobj_world_matrix(d), inv;
+        if (!swf_matrix_invert(&w, &inv)) return swf_num(0);
+        double x = inv.a * vm->mouse_x + inv.c * vm->mouse_y + inv.tx;
+        double y = inv.b * vm->mouse_x + inv.d * vm->mouse_y + inv.ty;
+        return swf_num(round(index == P_XMOUSE ? x : y) / 20.0);
+    }
     default: return swf_undef();
     }
 }
@@ -313,9 +276,12 @@ void clip_set_property_index(swf_ctx *cx, swf_dobj *d, int index, swf_val v)
         }
         break;
     }
-    case P_NAME:
-        vm_warn(cx->vm, WARN_CLONE, "avm1: renaming clips (_name) is not supported yet");
+    case P_NAME: {
+        char *u = str_to_utf8(to_string(cx, v), NULL);
+        if (!u || !swf_dobj_set_name(d, u)) vm_abort(cx->vm, "out of memory renaming a clip");
+        free(u);
         break;
+    }
     default:
         break;
     }

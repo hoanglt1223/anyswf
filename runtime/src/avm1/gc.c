@@ -91,6 +91,9 @@ static void trace(gray *g, swf_gc_hdr *h)
         case OC_SUPER:
             push_obj(g, o->u.super_.this_);
             break;
+        case OC_SOUND:
+            push_obj(g, o->u.sound.target);
+            break;
         default:
             break;
         }
@@ -126,9 +129,21 @@ static void collect(swf_vm *vm)
     swf_obj *roots[] = {vm->object_proto, vm->function_proto, vm->array_proto, vm->string_proto,
                         vm->number_proto, vm->boolean_proto, vm->error_proto, vm->clip_proto,
                         vm->object_ctor, vm->function_ctor, vm->array_ctor, vm->string_ctor,
-                        vm->number_ctor, vm->boolean_ctor};
+                        vm->number_ctor, vm->boolean_ctor, vm->key_obj, vm->mouse_obj, vm->stage_obj,
+                        vm->button_proto, vm->textfield_proto, vm->date_proto, vm->sound_proto,
+                        vm->textformat_proto, vm->color_proto, vm->classes, vm->timer_objs,
+                        vm->shared_objects, vm->voices, vm->hover, vm->pressed, vm->drag};
     for (size_t i = 0; i < sizeof roots / sizeof roots[0]; i++) push_obj(&g, roots[i]);
     for (int i = 0; i < SWF_GLOBAL_REGS; i++) push_val(&g, vm->regs[i]);
+    for (uint32_t i = 0; i < vm->nstreams; i++) push_obj(&g, vm->streams[i].clip);
+    for (int p = 0; p < Q_PRIORITIES; p++)
+        for (uint32_t i = vm->q_head[p]; i < vm->q_tail[p]; i++) {
+            const queued *q = &vm->queue[p][i];
+            push_obj(&g, q->clip);
+            push_obj(&g, q->obj);
+            if (q->name) push(&g, &q->name->gc);
+            for (uint8_t k = 0; k < q->nargs; k++) push_val(&g, q->args[k]);
+        }
     swf_str **names = (swf_str **)&vm->s;
     for (size_t i = 0; i < sizeof vm->s / sizeof(swf_str *); i++)
         if (names[i]) push(&g, &names[i]->gc);

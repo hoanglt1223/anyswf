@@ -334,6 +334,34 @@ static void draw_quad(const GLfloat xy[8], const GLfloat *uv)
     glDisableClientState(GL_TEXTURE_COORD_ARRAY);
 }
 
+void swf_render_mesh(const swf_matrix *m, const swf_mesh_vertex *v, uint32_t vertex_count, const uint16_t *idx,
+                     uint32_t index_count, const swf_cxform *cx, uint8_t blend)
+{
+    if (!vertex_count || !index_count) return;
+    size_t need = (size_t)vertex_count * 4;
+    if (need > g_scratch_cap) {
+        uint8_t *n = realloc(g_scratch, need);
+        if (!n) return;
+        g_scratch = n;
+        g_scratch_cap = need;
+    }
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        uint32_t c = v[i].rgba;
+        uint8_t in[4] = {(uint8_t)c, (uint8_t)(c >> 8), (uint8_t)(c >> 16), (uint8_t)(c >> 24)};
+        swf_cxform_apply(cx, in, g_scratch + i * 4);
+    }
+    load_matrix(m, 1.0f);
+    set_blend(blend);
+    glDisable(GL_TEXTURE_2D);
+    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glEnableClientState(GL_COLOR_ARRAY);
+    glColorPointer(4, GL_UNSIGNED_BYTE, 4, g_scratch);
+    glVertexPointer(2, GL_FLOAT, sizeof *v, &v->x);
+    glDrawElements(GL_TRIANGLES, (GLsizei)index_count, GL_UNSIGNED_SHORT, idx);
+    glDisableClientState(GL_COLOR_ARRAY);
+}
+
 void swf_render_rect(const swf_matrix *m, const int32_t r[4], uint32_t rgba, const swf_cxform *cx)
 {
     uint8_t in[4] = {(uint8_t)rgba, (uint8_t)(rgba >> 8), (uint8_t)(rgba >> 16), (uint8_t)(rgba >> 24)}, c[4];

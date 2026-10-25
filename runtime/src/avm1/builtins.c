@@ -124,9 +124,19 @@ static swf_val object_register_class(swf_ctx *cx, swf_val this_, uint32_t argc, 
     (void)this_;
     if (argc < 2) return swf_bool(false);
     if (!is_nullish(argv[1]) && !is_function(argv[1])) return swf_bool(false);
-    (void)to_string(cx, argv[0]);
-    /* Linking exported symbols to classes (attachMovie) arrives with the MovieClip
-     * built-ins; the call itself succeeds as in Flash. */
+    /* Links an exported symbol to a class: its instances get the class prototype and
+     * constructor (placed by the timeline or by attachMovie). */
+    swf_vm *vm = cx->vm;
+    char *name = str_to_utf8(to_string(cx, argv[0]), NULL);
+    if (!name) return swf_bool(false);
+    const swf_assets *a = vm->movie->assets;
+    for (uint32_t i = 0; i < a->export_count; i++) {
+        if (strcmp(a->exports[i].name, name) != 0) continue;
+        swf_str *key = atom_int(vm, a->exports[i].char_id);
+        if (is_nullish(argv[1])) obj_delete(cx, vm->classes, key);
+        else obj_define(vm, vm->classes, key, argv[1], 0);
+    }
+    free(name);
     return swf_bool(true);
 }
 

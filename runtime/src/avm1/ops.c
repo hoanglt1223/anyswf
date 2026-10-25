@@ -276,11 +276,6 @@ swf_val swf_op_random(swf_ctx *cx, swf_val max)
     return swf_num((double)((x & 0x7FFFFFFF) % (uint32_t)n));
 }
 
-swf_val swf_op_get_time(swf_ctx *cx)
-{
-    return swf_num((double)((plat_time_us() - cx->vm->start_us) / 1000));
-}
-
 void swf_op_trace(swf_ctx *cx, swf_val v)
 {
     swf_vm *vm = cx->vm;
@@ -380,11 +375,6 @@ void swf_act_stop(swf_ctx *cx)
     if (d) swf_clip_stop(d);
 }
 
-void swf_act_stop_sounds(swf_ctx *cx)
-{
-    vm_warn(cx->vm, WARN_SOUND, "avm1: stopAllSounds has no effect yet (sound arrives with the built-ins phase)");
-}
-
 void swf_act_toggle_quality(swf_ctx *cx)
 {
     vm_warn(cx->vm, WARN_QUALITY, "avm1: toggleHighQuality ignored (the renderer has one quality)");
@@ -430,31 +420,12 @@ void swf_act_set_target2(swf_ctx *cx, swf_val target)
     set_target_clip(cx, d, d != NULL);
 }
 
-void swf_act_clone_sprite(swf_ctx *cx, swf_val source, swf_val target, swf_val depth)
-{
-    (void)source; (void)target; (void)depth;
-    vm_warn(cx->vm, WARN_CLONE, "avm1: duplicateMovieClip is not supported yet");
-}
-
 void swf_act_remove_sprite(swf_ctx *cx, swf_val target)
 {
     swf_dobj *d = resolve_target_clip(cx, target_or_root(cx), target, true);
     /* Only clips created by script (depth >= 0 in AVM terms) can be removed. */
     if (!d || !d->parent || d->depth < 16384) return;
     swf_clip_remove_child(cx->vm->movie, d->parent, d->depth);
-}
-
-void swf_dyn_start_drag(swf_ctx *cx, swf_val *S, int *sp)
-{
-    int n = 3;
-    if (*sp >= 3 && to_int32(cx, S[*sp - 3]) == 1) n = 7;
-    *sp = *sp > n ? *sp - n : 0;
-    vm_warn(cx->vm, WARN_DRAG, "avm1: startDrag is not supported yet");
-}
-
-void swf_act_end_drag(swf_ctx *cx)
-{
-    (void)cx;
 }
 
 swf_val swf_act_target_path(swf_ctx *cx, swf_val v)

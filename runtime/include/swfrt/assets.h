@@ -156,6 +156,10 @@ typedef struct swf_edit_text {
     int16_t leading;
     const char *var_name;
     const char *initial_text;
+    /* Run-time state (TextField.background/border), initialised from the Border flag. */
+    bool background, border;
+    uint32_t background_color, border_color; /* RGBA bytes, R lowest */
+    uint8_t auto_size;                       /* 0 none, 1 left, 2 center, 3 right */
 } swf_edit_text;
 
 typedef struct swf_glyph {

@@ -432,6 +432,10 @@ static bool parse_misc(swf_assets *a, ctx *c)
         e->leading = (int16_t)rd16(r + 36);
         if (!str_ref(c, rd32(r + 40), &e->var_name) || !str_ref(c, rd32(r + 44), &e->initial_text))
             return false;
+        e->background = e->border = (e->flags & (1u << 11)) != 0; /* SWF EditText Border flag */
+        e->background_color = 0xFFFFFFFFu;
+        e->border_color = 0xFF000000u;
+        e->auto_size = (e->flags & (1u << 14)) ? 1 : 0; /* SWF 8 AutoSize flag: left aligned */
     }
 
     if (!table(c, "GLYF", 12, &b)) return false;

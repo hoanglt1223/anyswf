@@ -217,6 +217,30 @@ void swf_render_shape(const swf_assets *a, uint32_t shape, const swf_matrix *m, 
     }
 }
 
+void swf_render_mesh(const swf_matrix *m, const swf_mesh_vertex *v, uint32_t vertex_count, const uint16_t *idx,
+                     uint32_t index_count, const swf_cxform *cx, uint8_t blend)
+{
+    if (!vertex_count || !index_count) return;
+    size_t vsize = (size_t)vertex_count * sizeof(color_vertex_f), isize = (size_t)index_count * 2;
+    color_vertex_f *out = ring_alloc(vsize);
+    uint16_t *ix = out ? ring_alloc(isize) : NULL;
+    if (!ix) return;
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        uint32_t c = v[i].rgba;
+        uint8_t in[4] = {(uint8_t)c, (uint8_t)(c >> 8), (uint8_t)(c >> 16), (uint8_t)(c >> 24)}, o[4];
+        swf_cxform_apply(cx, in, o);
+        out[i] = (color_vertex_f){abgr(o), v[i].x, v[i].y, 0};
+    }
+    memcpy(ix, idx, isize);
+    ring_flush(out, vsize);
+    ring_flush(ix, isize);
+    load_matrix(m, 1.0f);
+    set_blend(blend);
+    sceGuDisable(GU_TEXTURE_2D);
+    sceGuDrawArray(GU_TRIANGLES, GU_COLOR_8888 | GU_VERTEX_32BITF | GU_INDEX_16BIT | GU_TRANSFORM_3D,
+                   (int)index_count, ix, out);
+}
+
 void swf_render_rect(const swf_matrix *m, const int32_t r[4], uint32_t rgba, const swf_cxform *cx)
 {
     uint8_t in[4] = {(uint8_t)rgba, (uint8_t)(rgba >> 8), (uint8_t)(rgba >> 16), (uint8_t)(rgba >> 24)}, c[4];

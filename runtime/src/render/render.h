@@ -17,6 +17,17 @@ void swf_render_end(void);
 void swf_render_shape(const swf_assets *a, uint32_t shape, const swf_matrix *m, const swf_cxform *cx,
                       uint8_t blend, bool strokes);
 
+/* Vertex of a mesh built at run time (drawing API, cursor): position in twips, colour as
+ * RGBA bytes (R lowest). */
+typedef struct swf_mesh_vertex {
+    float x, y;
+    uint32_t rgba;
+} swf_mesh_vertex;
+
+/* Draws indexed triangles built at run time. The data only has to stay valid for the call. */
+void swf_render_mesh(const swf_matrix *m, const swf_mesh_vertex *v, uint32_t vertex_count, const uint16_t *idx,
+                     uint32_t index_count, const swf_cxform *cx, uint8_t blend);
+
 /* Draws a solid rectangle in twips (edit-text backgrounds and borders). */
 void swf_render_rect(const swf_matrix *m, const int32_t rect[4], uint32_t rgba, const swf_cxform *cx);
 

@@ -36,10 +36,20 @@ typedef enum obj_class {
     OC_CLIP,
     OC_SUPER,
     OC_ERROR,
-    OC_ARGUMENTS
+    OC_ARGUMENTS,
+    OC_DATE,
+    OC_SOUND
 } obj_class;
 
 typedef swf_val (*swf_native_fn)(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv);
+
+/* Native state of a Sound object (builtins/sound.c). */
+typedef struct swf_sound_state {
+    swf_obj *target;     /* clip object the sound is bound to; NULL = global */
+    uint32_t sound;      /* attached sound index or SWF_NONE */
+    uint32_t voice;      /* last voice started by this object, 0 = none */
+    uint32_t start_ms;   /* duration bookkeeping */
+} swf_sound_state;
 
 typedef struct swf_func {
     const swf_fn_desc *desc;   /* bytecode function, or NULL */
@@ -70,6 +80,8 @@ struct swf_obj {
             swf_obj *this_;
             uint8_t depth;
         } super_;
+        double date;           /* Date: ms since the epoch, NaN when invalid */
+        swf_sound_state sound;
     } u;
 };
 
@@ -89,6 +101,36 @@ typedef struct watcher_entry {
     swf_obj *callback;
     swf_val user;
 } watcher_entry;
+
+/* Action queue (Ruffle ActionQueue): higher priorities run first. */
+enum { Q_INIT = 0, Q_CONSTRUCT, Q_NORMAL, Q_PRIORITIES };
+enum { QK_SCRIPT = 0, QK_METHOD, QK_CONSTRUCT, QK_BROADCAST, QK_CALL };
+
+typedef struct queued {
+    swf_obj *clip;        /* clip object whose timeline the code runs on */
+    uint8_t kind;
+    bool unload;          /* runs although the clip was removed */
+    uint32_t script;      /* QK_SCRIPT */
+    swf_str *name;        /* QK_METHOD / QK_BROADCAST */
+    swf_obj *obj;         /* QK_METHOD / QK_BROADCAST target, QK_CONSTRUCT constructor, QK_CALL function */
+    uint8_t nargs;
+    swf_val args[2];
+} queued;
+
+#define SWF_KEYS 256
+#define SWF_KEY_MOUSE 255  /* key map value: the button acts as the mouse button */
+
+typedef struct swf_timer {
+    uint32_t id;
+    bool once;
+    uint64_t due, interval;
+} swf_timer;
+
+/* Interactive object under the cursor / being pressed (SWF button or clip in button mode). */
+typedef struct pick_ref {
+    swf_obj *obj;         /* script object (keeps identity across frames) */
+} pick_ref;
+
 
 struct swf_vm {
     swf_movie *movie;
@@ -127,6 +169,47 @@ struct swf_vm {
     uint32_t rng;
     uint64_t start_us;
     uint32_t warned;
+
+    /* action queue */
+    queued *queue[Q_PRIORITIES];
+    uint32_t q_head[Q_PRIORITIES], q_tail[Q_PRIORITIES], q_cap;
+    bool instantiating;        /* attachMovie & co. construct the clip themselves */
+
+    /* clock (getTimer, intervals) */
+    uint64_t now_ms;
+    swf_timer *timers;
+    uint32_t ntimers, timer_cap, next_timer_id;
+    swf_obj *timer_objs;       /* id -> {f, o, m, a} records */
+
+    /* input */
+    swf_config cfg;
+    bool key_down[SWF_KEYS];
+    uint32_t prev_held;
+    uint8_t last_key, last_ascii;
+    float cursor_x, cursor_y;  /* screen pixels */
+    float mouse_x, mouse_y;    /* stage twips */
+    bool mouse_down, mouse_visible;
+    bool pointer_mode;         /* the PC mouse drives the cursor (no drawn cursor) */
+    float pointer_x, pointer_y;
+    float stick_hold;          /* seconds the nub has been held */
+    swf_obj *hover, *pressed;  /* interactive objects */
+    swf_obj *drag;             /* clip being dragged */
+    bool drag_lock, drag_constrain;
+    float drag_dx, drag_dy, drag_rect[4];
+
+    /* built-in objects with native state */
+    swf_obj *key_obj, *mouse_obj, *stage_obj, *button_proto, *textfield_proto, *date_proto, *sound_proto,
+        *textformat_proto, *color_proto;
+    swf_obj *classes;          /* registered classes: "<char id>" -> constructor */
+    swf_obj *shared_objects;   /* SharedObject.getLocal cache: name -> object */
+    swf_obj *voices;           /* voice id -> Sound object (onSoundComplete) */
+    swf_mixer *mixer;
+    int16_t snd_volume, snd_pan;   /* global Sound transform (new Sound() without target) */
+    struct {
+        swf_obj *clip;             /* timeline whose stream sound plays */
+        uint32_t voice, tick;      /* tick of the last stream block seen */
+    } streams[8];
+    uint32_t nstreams, sound_tick;
 
     /* names used by the runtime itself */
     struct {
@@ -253,6 +336,56 @@ void clip_goto(swf_ctx *cx, swf_dobj *d, swf_val frame, bool play, uint32_t scen
 bool clip_removed(swf_dobj *d);
 void clip_init_builtins(swf_vm *vm);
 
+/* --- events and the action queue (builtins/events.c) --- */
+void vm_queue(swf_vm *vm, int prio, const queued *q);
+void vm_queue_script(swf_vm *vm, swf_dobj *clip, uint32_t script, bool unload);
+void vm_queue_method(swf_vm *vm, swf_dobj *clip, swf_obj *obj, swf_str *name, uint32_t nargs, const swf_val *args,
+                     bool unload);
+void vm_queue_broadcast(swf_vm *vm, swf_obj *obj, const char *name, uint32_t nargs, const swf_val *args);
+/* Clip events (swf::ClipEventFlag bits) plus the matching AS2 handler method. */
+void vm_clip_event(swf_vm *vm, swf_dobj *clip, uint32_t flag, const char *method, uint8_t key_code);
+void vm_display_event(swf_movie *m, swf_dobj *clip, int event, void *user);
+bool vm_button_mode(swf_vm *vm, swf_dobj *clip);
+bool vm_is_enabled(swf_vm *vm, swf_dobj *d);
+typedef void (*vm_task_fn)(swf_ctx *cx, void *user);
+/* Runs `fn` with a context on `clip` (root when NULL), catching aborts and reporting
+ * uncaught exceptions as Flash does. */
+void vm_run_protected(swf_vm *vm, swf_dobj *clip, vm_task_fn fn, void *user);
+swf_val vm_call_value(swf_ctx *cx, swf_val fn, swf_val this_, uint32_t argc, const swf_val *argv);
+swf_obj *vm_registered_class(swf_vm *vm, swf_dobj *d);
+void builtins_broadcaster(swf_vm *vm);
+void broadcaster_init(swf_vm *vm, swf_obj *o);
+
+/* --- input (builtins/key.c, builtins/mouse.c) --- */
+void builtins_key(swf_vm *vm);
+void builtins_mouse(swf_vm *vm);
+void key_update(swf_vm *vm, const swf_input *in);
+bool input_has_keys(const swf_input *in);
+uint8_t key_ascii(swf_vm *vm, uint8_t code);
+void mouse_update(swf_vm *vm, const swf_input *in, double dt);
+void mouse_stop_drag(swf_vm *vm);
+void mouse_start_drag(swf_vm *vm, swf_dobj *d, bool lock, bool constrain, const float rect[4]);
+swf_str *mouse_drop_target(swf_vm *vm, swf_dobj *dragged);
+void mouse_button_key_press(swf_vm *vm, uint8_t code);
+void mouse_forget(swf_vm *vm, swf_obj *o);
+
+/* --- other built-ins (runtime/src/builtins) --- */
+void builtins_movieclip(swf_vm *vm);
+void builtins_button(swf_vm *vm);
+void builtins_timers(swf_vm *vm);
+void builtins_textfield(swf_vm *vm);
+void textfield_sync_variables(swf_vm *vm);
+void builtins_date(swf_vm *vm);
+void builtins_sound(swf_vm *vm);
+void sound_after_frame(swf_vm *vm);
+void sound_timeline(swf_movie *m, swf_dobj *clip, const uint8_t *cmd, void *user);
+void sound_stop_all(swf_vm *vm);
+void sound_clip_removed(swf_vm *vm, swf_dobj *clip);
+void builtins_sharedobject(swf_vm *vm);
+void sharedobject_flush_all(swf_vm *vm);
+void builtins_stage(swf_vm *vm);
+swf_obj *clip_new_object(swf_vm *vm, swf_dobj *d);
+
 /* --- builtins (builtins_*.c) --- */
 void builtins_init(swf_vm *vm);
 void builtins_object(swf_vm *vm);
@@ -278,6 +411,24 @@ static inline swf_dobj *ctx_target(swf_ctx *cx)
     swf_dobj *d = cx->target_o && cx->target_o->cls == OC_CLIP ? cx->target_o->u.clip : NULL;
     return d && !d->removed ? d : NULL;
 }
+/* Context for native code outside script execution: global scope, root as base. Only
+ * for operations that cannot run script code (no getters, no calls); use
+ * vm_run_protected otherwise. */
+static inline swf_ctx vm_ctx(swf_vm *vm)
+{
+    swf_ctx c;
+    memset(&c, 0, sizeof c);
+    c.vm = vm;
+    c.scope = vm->global_scope;
+    c.this_ = swf_undef();
+    c.version = vm->version;
+    c.target_valid = true;
+    c.saved_handler = vm->handler;
+    c.arena_mark = vm->arena_top;
+    return c;
+}
+bool vm_get_safe(swf_vm *vm, swf_obj *o, const char *name, swf_val *out);
+
 /* Prints a Flash Player warning into the trace output ("Warning: ..."). */
 void vm_trace_warning(swf_vm *vm, const char *msg);
 void gc_collect_now(swf_vm *vm);
@@ -292,6 +443,20 @@ static inline swf_val arg(uint32_t argc, const swf_val *argv, uint32_t i)
 }
 static inline bool is_nullish(swf_val v) { return v.t == SWF_T_UNDEF || v.t == SWF_T_NULL; }
 
+/* Clip event flags as stored in assets.bin (swf::ClipEventFlag). */
+enum {
+    CE_LOAD = 1u << 0, CE_ENTER_FRAME = 1u << 1, CE_UNLOAD = 1u << 2, CE_MOUSE_MOVE = 1u << 3,
+    CE_MOUSE_DOWN = 1u << 4, CE_MOUSE_UP = 1u << 5, CE_KEY_DOWN = 1u << 6, CE_KEY_UP = 1u << 7,
+    CE_DATA = 1u << 8, CE_INITIALIZE = 1u << 9, CE_PRESS = 1u << 10, CE_RELEASE = 1u << 11,
+    CE_RELEASE_OUTSIDE = 1u << 12, CE_ROLL_OVER = 1u << 13, CE_ROLL_OUT = 1u << 14, CE_DRAG_OVER = 1u << 15,
+    CE_DRAG_OUT = 1u << 16, CE_KEY_PRESS = 1u << 17, CE_CONSTRUCT = 1u << 18,
+    CE_BUTTON_EVENTS = CE_PRESS | CE_RELEASE | CE_RELEASE_OUTSIDE | CE_ROLL_OVER | CE_ROLL_OUT | CE_DRAG_OVER |
+                       CE_DRAG_OUT | CE_KEY_PRESS
+};
+
+/* Flash's AVM depth bias: script depth 0 is timeline depth 16384. */
+#define AVM_DEPTH_BIAS 16384
+
 enum {
     WARN_UNKNOWN_OP = 1u << 0,
     WARN_GETURL = 1u << 1,
@@ -299,7 +464,14 @@ enum {
     WARN_CLONE = 1u << 3,
     WARN_STACK = 1u << 4,
     WARN_QUALITY = 1u << 5,
-    WARN_SOUND = 1u << 6
+    WARN_SOUND = 1u << 6,
+    WARN_QUEUE = 1u << 7,
+    WARN_LOADSOUND = 1u << 8,
+    WARN_BITMAP_FILL = 1u << 9,
+    WARN_SO_IO = 1u << 10,
+    WARN_MP3 = 1u << 11,
+    WARN_SETMASK = 1u << 12,
+    WARN_TEXT_INPUT = 1u << 13
 };
 
 #endif
