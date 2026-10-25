@@ -1,14 +1,15 @@
 # anyswf_add_game(<target> <game.c> [TITLE <title>] [APP_ID <id>])
 # Builds a player for one compiled movie (swf2c compile output): an executable, an
 # EBOOT.PBP on PSP, or libmain.so (loaded by SDLActivity) on Android. APP_ID names the
-# save folder ([A-Za-z0-9_-], at most 32 characters; default: the target name).
+# save folder ([A-Za-z0-9_-], at most 32 characters; default: the target name, cut to fit).
 function(anyswf_add_game target game_c)
     cmake_parse_arguments(ARG "" "TITLE;APP_ID" "" ${ARGN})
     if(NOT ARG_TITLE)
         set(ARG_TITLE "${target}")
     endif()
     if(NOT ARG_APP_ID)
-        set(ARG_APP_ID "${target}")
+        string(REGEX REPLACE "[^A-Za-z0-9_-]" "_" ARG_APP_ID "${target}")
+        string(SUBSTRING "${ARG_APP_ID}" 0 32 ARG_APP_ID)
     endif()
     if(NOT ARG_APP_ID MATCHES "^[A-Za-z0-9_-]+$")
         message(FATAL_ERROR "anyswf_add_game: APP_ID '${ARG_APP_ID}' may only use A-Z a-z 0-9 _ -")
