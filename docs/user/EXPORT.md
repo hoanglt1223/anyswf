@@ -42,13 +42,17 @@ the platform's user data folder: `%APPDATA%\anyport\<id>\` on Windows,
 on macOS, the app's internal storage on Android, `ms0:/PSP/SAVEDATA/<id>/` on PSP.
 
 Game command line (PC): `<Name> [--headless] [--frames N] [--screenshot f.png]
-[--msaa N] [--touch-keys k1,k2,...]`. `--screenshot` renders frame N (default 1) at the
-stage size without a window, which is how CI checks an export.
+[--msaa N] [--touch-keys k1,k2,...] [--config anyswf.toml] [--input ...] [--save-dir DIR]
+[--wav out.wav] [--profile]`. `--screenshot` renders frame N (default 1) at the
+stage size without a window, which is how CI checks an export. The other options are
+described in the [README](../../README.md) (Build).
 
 ## Per-game settings
 
 `--config game.toml` reads these keys; other keys and tables are ignored, so the file can
-also hold the runtime's per-game settings. Command-line options win.
+also hold the runtime's per-game settings (keys, cursor, stage scaling, profiler; see
+[USAGE.md](USAGE.md)). The file is copied next to `assets.bin` as `anyswf.toml`, where the
+game reads those settings. Command-line options win.
 
 ```toml
 title = "Sky Hop"           # window, EBOOT and app name (default: the SWF file name)
