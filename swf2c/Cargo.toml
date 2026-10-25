@@ -25,6 +25,10 @@ path = "src/lib.rs"
 name = "swf2c"
 path = "src/main.rs"
 
+[[bin]]
+name = "anyswf"
+path = "src/anyswf/main.rs"
+
 # Exact pins: asset output must not change under a semver-compatible update.
 [dependencies]
 swf = { version = "=0.3.0", default-features = false, features = ["flate2"] }
@@ -34,3 +38,4 @@ png = "=0.18.1"
 flate2 = "=1.1.9"
 gif = "=0.14.2"
 symphonia = { version = "=0.5.5", default-features = false, features = ["mp3"] }
+toml = { version = "=1.1.8", default-features = false, features = ["parse", "std", "serde"] }
