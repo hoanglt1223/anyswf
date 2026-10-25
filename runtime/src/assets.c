@@ -1,3 +1,8 @@
+/* posix_memalign is POSIX, hidden by strict -std=c11 without this. */
+#if !defined(_MSC_VER) && !defined(__PSP__) && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200112L
+#endif
+
 #include "swfrt/assets.h"
 
 #include <stdlib.h>
