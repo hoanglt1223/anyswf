@@ -147,6 +147,7 @@ def main():
     ap.add_argument("--config", default="Release")
     ap.add_argument("--list-selection", action="store_true")
     ap.add_argument("--timeout", type=int, default=60)
+    ap.add_argument("--jobs", type=int, help="parallel build jobs (default: the generator's)")
     args = ap.parse_args()
     swf2c = os.path.abspath(args.swf2c)
     out = os.path.abspath(args.out)
@@ -223,7 +224,10 @@ def main():
     if r.returncode != 0:
         print(r.stdout[-4000:], r.stderr[-4000:])
         sys.exit(2)
-    r = run(["cmake", "--build", bdir, "--config", args.config, "--parallel"])
+    build = ["cmake", "--build", bdir, "--config", args.config, "--parallel"]
+    if args.jobs:
+        build.append(str(args.jobs))
+    r = run(build)
     build_log = r.stdout + r.stderr
 
     results = []

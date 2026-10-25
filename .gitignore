@@ -10,3 +10,4 @@
 !tests/ruffle/**/*.swf
 !tests/ruffle-avm1/**/*.swf
 __pycache__/
+*.pyc

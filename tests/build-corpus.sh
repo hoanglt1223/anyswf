@@ -33,6 +33,7 @@ if [ -d "$std_dir/std" ]; then
 fi
 
 mkdir -p "$out"
+out="$(cd "$out" && pwd)"   # MTASC runs from the source dir below
 count=0
 for as in "$src"/*.as; do
     name="$(basename "$as" .as)"
