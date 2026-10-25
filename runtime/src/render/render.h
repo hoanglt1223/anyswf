@@ -17,14 +17,16 @@ void swf_render_end(void);
 void swf_render_shape(const swf_assets *a, uint32_t shape, const swf_matrix *m, const swf_cxform *cx,
                       uint8_t blend, bool strokes);
 
-/* Vertex of a mesh built at run time (drawing API, cursor): position in twips, colour as
- * RGBA bytes (R lowest). */
+/* Vertex of a mesh built at run time (drawing API, cursor): colour as RGBA bytes (R
+ * lowest), position in twips, z = 0. The layout is the GE's COLOR_8888 | VERTEX_32BITF,
+ * so meshes without a colour transform are drawn in place on PSP. */
 typedef struct swf_mesh_vertex {
-    float x, y;
     uint32_t rgba;
+    float x, y, z;
 } swf_mesh_vertex;
 
-/* Draws indexed triangles built at run time. The data only has to stay valid for the call. */
+/* Draws indexed triangles built at run time. The data must stay unchanged until the frame
+ * has been presented (the GE may read it in place). */
 void swf_render_mesh(const swf_matrix *m, const swf_mesh_vertex *v, uint32_t vertex_count, const uint16_t *idx,
                      uint32_t index_count, const swf_cxform *cx, uint8_t blend);
 

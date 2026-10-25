@@ -52,7 +52,8 @@ static void *ring_alloc(size_t size)
 
 static void ring_flush(void *p, size_t size)
 {
-    sceKernelDcacheWritebackRange(p, (unsigned int)((size + 63) & ~(size_t)63));
+    uintptr_t start = (uintptr_t)p & ~(uintptr_t)63, end = ((uintptr_t)p + size + 63) & ~(uintptr_t)63;
+    sceKernelDcacheWritebackRange((void *)start, (unsigned int)(end - start));
 }
 
 static uint32_t abgr(const uint8_t c[4])
@@ -267,24 +268,30 @@ void swf_render_mesh(const swf_matrix *m, const swf_mesh_vertex *v, uint32_t ver
                      uint32_t index_count, const swf_cxform *cx, uint8_t blend)
 {
     if (!vertex_count || !index_count) return;
-    size_t vsize = (size_t)vertex_count * sizeof(color_vertex_f), isize = (size_t)index_count * 2;
-    color_vertex_f *out = ring_alloc(vsize);
-    uint16_t *ix = out ? ring_alloc(isize) : NULL;
-    if (!ix) return;
-    for (uint32_t i = 0; i < vertex_count; i++) {
-        uint32_t c = v[i].rgba;
-        uint8_t in[4] = {(uint8_t)c, (uint8_t)(c >> 8), (uint8_t)(c >> 16), (uint8_t)(c >> 24)}, o[4];
-        swf_cxform_apply(cx, in, o);
-        out[i] = (color_vertex_f){abgr(o), v[i].x, v[i].y, 0};
+    size_t vsize = (size_t)vertex_count * sizeof(swf_mesh_vertex), isize = (size_t)index_count * 2;
+    const void *verts = v;
+    if (swf_cxform_is_identity_mul(cx) && !swf_cxform_has_add(cx)) {
+        /* Same layout as the GE vertex: draw the caller's data in place. */
+        ring_flush((void *)v, vsize);
+        ring_flush((void *)idx, isize);
+    } else {
+        swf_mesh_vertex *out = ring_alloc(vsize);
+        if (!out) return;
+        for (uint32_t i = 0; i < vertex_count; i++) {
+            uint32_t c = v[i].rgba;
+            uint8_t in[4] = {(uint8_t)c, (uint8_t)(c >> 8), (uint8_t)(c >> 16), (uint8_t)(c >> 24)}, o[4];
+            swf_cxform_apply(cx, in, o);
+            out[i] = (swf_mesh_vertex){abgr(o), v[i].x, v[i].y, 0};
+        }
+        ring_flush(out, vsize);
+        verts = out;
     }
-    memcpy(ix, idx, isize);
-    ring_flush(out, vsize);
-    ring_flush(ix, isize);
+    const uint16_t *ix = idx;
     load_matrix(m, 1.0f);
     set_blend(blend);
     sceGuDisable(GU_TEXTURE_2D);
     sceGuDrawArray(GU_TRIANGLES, GU_COLOR_8888 | GU_VERTEX_32BITF | GU_INDEX_16BIT | GU_TRANSFORM_3D,
-                   (int)index_count, ix, out);
+                   (int)index_count, ix, verts);
     swf_prof.draws++;
     swf_prof.tris += index_count / 3;
 }

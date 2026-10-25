@@ -386,7 +386,7 @@ static void emit_quad(swf_drawing *d, const float xy[8], const swf_fill_style *f
     uint16_t b = (uint16_t)d->nv;
     for (int i = 0; i < 4; i++) {
         float x = xy[i * 2], y = xy[i * 2 + 1];
-        d->v[d->nv++] = (swf_mesh_vertex){x, y, fs ? gradient_color(fs, x, y) : rgba};
+        d->v[d->nv++] = (swf_mesh_vertex){.rgba = fs ? gradient_color(fs, x, y) : rgba, .x = x, .y = y};
     }
     const uint16_t q[6] = {b, (uint16_t)(b + 1), (uint16_t)(b + 2), b, (uint16_t)(b + 2), (uint16_t)(b + 3)};
     memcpy(d->ix + d->ni, q, sizeof q);
@@ -532,10 +532,10 @@ static void emit_disc(swf_drawing *d, float x, float y, float r, uint32_t rgba)
     if (segs > 16) segs = 16;
     if (!mesh_room(d, (uint32_t)segs + 1, (uint32_t)segs * 3, false)) return;
     uint16_t c = (uint16_t)d->nv;
-    d->v[d->nv++] = (swf_mesh_vertex){x, y, rgba};
+    d->v[d->nv++] = (swf_mesh_vertex){.rgba = rgba, .x = x, .y = y};
     for (int i = 0; i < segs; i++) {
         float a = 6.2831853f * i / segs;
-        d->v[d->nv++] = (swf_mesh_vertex){x + r * cosf(a), y + r * sinf(a), rgba};
+        d->v[d->nv++] = (swf_mesh_vertex){.rgba = rgba, .x = x + r * cosf(a), .y = y + r * sinf(a)};
     }
     for (int i = 0; i < segs; i++) {
         d->ix[d->ni++] = c;

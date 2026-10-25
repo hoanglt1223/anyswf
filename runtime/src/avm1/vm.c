@@ -75,6 +75,12 @@ swf_ctx ctx_for_clip(swf_vm *vm, swf_dobj *clip)
 void vm_run_protected(swf_vm *vm, swf_dobj *clip, vm_task_fn fn, void *user)
 {
     swf_ctx c = ctx_for_clip(vm, clip ? clip : clip_root(vm));
+    vm_protect(vm, &c, fn, user);
+}
+
+void vm_protect(swf_vm *vm, swf_ctx *cx, vm_task_fn fn, void *user)
+{
+    swf_ctx c = *cx;
     jmp_buf jb;
     jmp_buf *saved_abort = vm->abort_jb;
     swf_try *saved_handler = vm->handler;

@@ -99,7 +99,8 @@ static void get_task(swf_ctx *cx, void *user)
 bool vm_get_safe(swf_vm *vm, swf_obj *o, const char *name, swf_val *out)
 {
     get_req r = {o, atom_ascii(vm, name), swf_undef(), false};
-    vm_run_protected(vm, NULL, get_task, &r);
+    swf_ctx c = vm_ctx(vm);
+    vm_protect(vm, &c, get_task, &r);
     *out = r.out;
     return r.found;
 }

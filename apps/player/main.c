@@ -351,7 +351,11 @@ int main(int argc, char **argv)
     load_config(&a, &cfg);
     if (a.screenshot) cfg.cursor_visible = false;
     swf_prof.overlay = cfg.profiler;
+#ifdef __PSP__
+    swf_prof.log = cfg.profiler; /* no command line: the overlay setting also logs */
+#else
     swf_prof.log = a.profile;
+#endif
     swf_assets assets;
 #ifdef __PSP__
     r = swf_assets_load(&assets, PLAT_ROOT_DATA, a.assets ? a.assets : "assets.bin");

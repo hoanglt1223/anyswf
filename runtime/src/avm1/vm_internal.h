@@ -353,6 +353,8 @@ typedef void (*vm_task_fn)(swf_ctx *cx, void *user);
 /* Runs `fn` with a context on `clip` (root when NULL), catching aborts and reporting
  * uncaught exceptions as Flash does. */
 void vm_run_protected(swf_vm *vm, swf_dobj *clip, vm_task_fn fn, void *user);
+/* The same with a caller-made context (e.g. vm_ctx, which allocates nothing). */
+void vm_protect(swf_vm *vm, swf_ctx *cx, vm_task_fn fn, void *user);
 swf_val vm_call_value(swf_ctx *cx, swf_val fn, swf_val this_, uint32_t argc, const swf_val *argv);
 swf_obj *vm_registered_class(swf_vm *vm, swf_dobj *d);
 void builtins_broadcaster(swf_vm *vm);

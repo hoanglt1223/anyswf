@@ -324,10 +324,10 @@ void swf_vm_draw_overlay(swf_vm *vm)
     /* An arrow 12 px tall: black outline under a white body, tip at the hot spot. */
     static const float OUTER[] = {-1, -2, -1, 14, 3, 11, 6, 17, 9, 16, 6, 10, 11, 10};
     static const float INNER[] = {0, 0, 0, 11, 3, 8.5f, 6, 15, 7.5f, 14.5f, 4.8f, 9, 8.5f, 9};
-    swf_mesh_vertex v[14];
+    static swf_mesh_vertex v[14]; /* read by the GE after this returns */
     for (int i = 0; i < 7; i++) {
-        v[i] = (swf_mesh_vertex){OUTER[i * 2], OUTER[i * 2 + 1], 0xFF000000u};
-        v[7 + i] = (swf_mesh_vertex){INNER[i * 2], INNER[i * 2 + 1], 0xFFFFFFFFu};
+        v[i] = (swf_mesh_vertex){.rgba = 0xFF000000u, .x = OUTER[i * 2], .y = OUTER[i * 2 + 1]};
+        v[7 + i] = (swf_mesh_vertex){.rgba = 0xFFFFFFFFu, .x = INNER[i * 2], .y = INNER[i * 2 + 1]};
     }
     /* Each arrow: head (0,1,6) + tail quad (2,3,4,5) fanned from the notch. */
     static const uint16_t IDX[] = {0, 1, 6, 2, 3, 4, 2, 4, 5, 7, 8, 13, 9, 10, 11, 9, 11, 12};
