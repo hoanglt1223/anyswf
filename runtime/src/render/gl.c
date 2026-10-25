@@ -2,6 +2,7 @@
  * Mirrors what the GE can do: vertex colours or a modulated texture, four blend
  * equations, stencil masks. */
 #include "render.h"
+#include "swfrt/profiler.h"
 
 #include "plat_gl.h"
 
@@ -144,6 +145,7 @@ static uint8_t *unswizzle(const uint8_t *src, uint32_t width_bytes, uint32_t hei
 plat_result swf_render_init(const swf_assets *a)
 {
     swf_render_shutdown();
+    swf_prof.texture_used = swf_prof.texture_capacity = 0;
     load_gl_procs();
     g_tex_count = a->texture_count;
     g_tex = calloc(g_tex_count ? g_tex_count : 1, sizeof *g_tex);
@@ -168,6 +170,7 @@ plat_result swf_render_init(const swf_assets *a)
         glBindTexture(GL_TEXTURE_2D, g_tex[i]);
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, t->width, t->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+        swf_prof.texture_used += (size_t)t->width * t->height * 4;
         GLint wrap = (t->flags & SWF_TEX_REPEAT) ? GL_REPEAT : GL_CLAMP_TO_EDGE;
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap);
@@ -290,6 +293,8 @@ void swf_render_shape(const swf_assets *a, uint32_t shape, const swf_matrix *m, 
             glVertexPointer(2, GL_SHORT, SWF_TEX_VERTEX_SIZE, v + 8);
         }
         glDrawElements(GL_TRIANGLES, (GLsizei)d->index_count, GL_UNSIGNED_SHORT, d->indices);
+        swf_prof.draws++;
+        swf_prof.tris += d->index_count / 3;
         if (d->textured && swf_cxform_has_add(cx)) {
             /* Additive colour-transform term: a second pass adds max(add, 0) weighted by
              * the texel's coverage, the same two-pass scheme the GE uses. Negative add
@@ -360,6 +365,8 @@ void swf_render_mesh(const swf_matrix *m, const swf_mesh_vertex *v, uint32_t ver
     glVertexPointer(2, GL_FLOAT, sizeof *v, &v->x);
     glDrawElements(GL_TRIANGLES, (GLsizei)index_count, GL_UNSIGNED_SHORT, idx);
     glDisableClientState(GL_COLOR_ARRAY);
+    swf_prof.draws++;
+    swf_prof.tris += index_count / 3;
 }
 
 void swf_render_rect(const swf_matrix *m, const int32_t r[4], uint32_t rgba, const swf_cxform *cx)

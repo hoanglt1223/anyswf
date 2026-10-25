@@ -21,6 +21,8 @@ add_library(swfrt STATIC
     src/builtins/sharedobject.c
     src/builtins/stage.c
     src/render/color_transform.c
+    src/render/texture_cache.c
+    src/debug/profiler.c
     src/avm1/value.c
     src/avm1/casemap.c
     src/avm1/gc.c

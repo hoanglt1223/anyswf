@@ -7,7 +7,10 @@
  * stencil buffer: the stencil test stays enabled with KEEP so normal draws never write
  * it, and masks use INCR/DECR on it like the GL backend. */
 #include "render.h"
+#include "swfrt/profiler.h"
+#include "texture_cache.h"
 
+#include <pspge.h>
 #include <pspgu.h>
 #include <pspkernel.h>
 
@@ -64,9 +67,32 @@ static uint8_t unit_to_byte(float f)
     return (uint8_t)(f * 255.0f + 0.5f);
 }
 
+/* VRAM left after the platform's frame and depth buffers holds resident textures. */
+static swf_texcache *g_cache;
+static uint8_t *g_vram_arena;
+static size_t g_vram_size;
+
+static void vram_upload(void *dst, const void *src, size_t size)
+{
+    /* Through the uncached VRAM mirror, so the GE sees the bytes without a cache flush. */
+    memcpy((void *)((uintptr_t)dst | 0x40000000u), src, size);
+}
+
 plat_result swf_render_init(const swf_assets *a)
 {
-    (void)a;
+    if (!g_vram_arena) {
+        uint8_t *base = (uint8_t *)sceGeEdramGetAddr();
+        uint8_t *next = base + (uintptr_t)guGetStaticVramTexture(0, 0, GU_PSM_8888);
+        uintptr_t end = (uintptr_t)base + sceGeEdramGetSize();
+        next = (uint8_t *)(((uintptr_t)next + 15) & ~(uintptr_t)15);
+        if ((uintptr_t)next < end) {
+            g_vram_arena = next;
+            g_vram_size = end - (uintptr_t)next;
+        }
+    }
+    swf_texcache_free(g_cache);
+    g_cache = g_vram_arena ? swf_texcache_new(g_vram_arena, g_vram_size, a->texture_count, vram_upload) : NULL;
+    if (!g_cache) plat_log("render: no VRAM texture cache; textures are read from RAM");
     /* Texture, CLUT, vertex and index data were read into cached RAM; the GE reads memory
      * directly. */
     sceKernelDcacheWritebackAll();
@@ -76,6 +102,8 @@ plat_result swf_render_init(const swf_assets *a)
 
 void swf_render_shutdown(void)
 {
+    swf_texcache_free(g_cache);
+    g_cache = NULL;
 }
 
 static void set_blend(uint8_t blend)
@@ -100,6 +128,14 @@ void swf_render_begin(const swf_assets *a)
     (void)a;
     g_ring_used = 0;
     g_stencil = 0;
+    swf_texcache_frame(g_cache);
+    swf_texcache_stats st;
+    swf_texcache_get_stats(g_cache, &st);
+    swf_prof.texture_used = st.used;
+    swf_prof.texture_capacity = st.capacity;
+    swf_prof.texture_uploads = st.uploads;
+    swf_prof.texture_evictions = st.evictions;
+    swf_prof.texture_misses = st.misses;
     ScePspFMatrix4 proj = {{2.0f / PLAT_SCREEN_W, 0, 0, 0},
                            {0, -2.0f / PLAT_SCREEN_H, 0, 0},
                            {0, 0, -1, 0},
@@ -147,7 +183,13 @@ static void bind_texture(const swf_assets *a, uint32_t index, bool smooth)
     } else {
         sceGuTexMode(t->format, 0, 0, (t->flags & SWF_TEX_SWIZZLED) ? 1 : 0);
     }
-    sceGuTexImage(0, t->width, t->height, t->width, t->data);
+    swf_texcache_stats before;
+    swf_texcache_get_stats(g_cache, &before);
+    const void *data = swf_texcache_use(g_cache, index, t->data, t->data_size);
+    swf_texcache_stats after;
+    swf_texcache_get_stats(g_cache, &after);
+    if (after.uploads != before.uploads) sceGuTexFlush(); /* the address may have held another texture */
+    sceGuTexImage(0, t->width, t->height, t->width, data);
     int wrap = (t->flags & SWF_TEX_REPEAT) ? GU_REPEAT : GU_CLAMP;
     sceGuTexWrap(wrap, wrap);
     int f = smooth ? GU_LINEAR : GU_NEAREST;
@@ -188,6 +230,8 @@ void swf_render_shape(const swf_assets *a, uint32_t shape, const swf_matrix *m, 
             sceGuDisable(GU_TEXTURE_2D);
             sceGuDrawArray(GU_TRIANGLES, GU_COLOR_8888 | GU_VERTEX_16BIT | GU_INDEX_16BIT | GU_TRANSFORM_3D,
                            (int)d->index_count, d->indices, v);
+            swf_prof.draws++;
+            swf_prof.tris += d->index_count / 3;
             continue;
         }
         bind_texture(a, d->texture, (d->flags & SWF_DRAW_SMOOTH) != 0);
@@ -197,6 +241,8 @@ void swf_render_shape(const swf_assets *a, uint32_t shape, const swf_matrix *m, 
         sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
         sceGuColor(abgr(mul));
         sceGuDrawArray(GU_TRIANGLES, vtype, (int)d->index_count, d->indices, d->vertices);
+        swf_prof.draws++;
+        swf_prof.tris += d->index_count / 3;
         if (swf_cxform_has_add(cx)) {
             /* Additive colour-transform term as a second pass: TFX_BLEND with the
              * environment and vertex colours both set to max(add, 0) yields that colour
@@ -239,6 +285,8 @@ void swf_render_mesh(const swf_matrix *m, const swf_mesh_vertex *v, uint32_t ver
     sceGuDisable(GU_TEXTURE_2D);
     sceGuDrawArray(GU_TRIANGLES, GU_COLOR_8888 | GU_VERTEX_32BITF | GU_INDEX_16BIT | GU_TRANSFORM_3D,
                    (int)index_count, ix, out);
+    swf_prof.draws++;
+    swf_prof.tris += index_count / 3;
 }
 
 void swf_render_rect(const swf_matrix *m, const int32_t r[4], uint32_t rgba, const swf_cxform *cx)

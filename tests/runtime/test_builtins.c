@@ -1,6 +1,7 @@
 /* Unit tests for run-time pieces that need no compiled movie: anyswf.toml parsing, the
  * sound mixer and the drawing API tessellator. */
 #include "display/drawing.h"
+#include "render/texture_cache.h"
 #include "swfrt/config.h"
 #include "swfrt/mixer.h"
 
@@ -161,8 +162,38 @@ static void test_drawing(void)
     swf_drawing_free(d);
 }
 
+static void copy_up(void *dst, const void *src, size_t n)
+{
+    memcpy(dst, src, n);
+}
+
+static void test_texture_cache(void)
+{
+    static _Alignas(16) uint8_t arena[1024];
+    static uint8_t tex[4][400];
+    for (int i = 0; i < 4; i++) memset(tex[i], i + 1, sizeof tex[i]);
+    swf_texcache *c = swf_texcache_new(arena, sizeof arena, 4, copy_up);
+    CHECK(c != NULL);
+    if (!c) return;
+    const uint8_t *a = swf_texcache_use(c, 0, tex[0], 400);
+    const uint8_t *b = swf_texcache_use(c, 1, tex[1], 400);
+    CHECK(a >= arena && a < arena + 1024 && b >= arena && a != b && a[0] == 1 && b[399] == 2);
+    /* A third texture does not fit while both are used in the frame being built. */
+    CHECK(swf_texcache_use(c, 2, tex[2], 400) == tex[2]);
+    swf_texcache_frame(c);
+    CHECK(swf_texcache_use(c, 1, tex[1], 400) == b);  /* resident: no upload */
+    const uint8_t *d = swf_texcache_use(c, 2, tex[2], 400);
+    CHECK(d == a && d[0] == 3); /* texture 0 was least recently used */
+    swf_texcache_stats st;
+    swf_texcache_get_stats(c, &st);
+    CHECK(st.uploads == 3 && st.evictions == 1 && st.misses == 1 && st.resident == 2 && st.used == 800);
+    CHECK(swf_texcache_use(c, 3, tex[3], 4096) == tex[3]); /* larger than the arena */
+    swf_texcache_free(c);
+}
+
 int main(void)
 {
+    test_texture_cache();
     test_config();
     test_mixer();
     test_drawing();

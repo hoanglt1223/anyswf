@@ -16,6 +16,8 @@
  *   square, triangle, l, r, start, select joined by '+', or none) from display frame F
  *   on, with the cursor at screen pixel X/Y when given.
  *   anyswf.toml defaults to the file next to assets.bin.
+ *   --profile logs frame times, draw counts and memory once per second.
+ * Holding L+R and pressing Select toggles the profiler overlay (also [debug] profiler).
  * PSP: loads assets.bin and anyswf.toml from the EBOOT folder and plays until exit.
  * Game builds (cmake/anyswf-game.cmake) define ANYSWF_APP_ID (save folder) and ANYSWF_TITLE. */
 #include "platform.h"
@@ -23,6 +25,7 @@
 #include "swfrt/avm1.h"
 #include "swfrt/mixer.h"
 #include "swfrt/movie.h"
+#include "swfrt/profiler.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -65,6 +68,7 @@ typedef struct args {
     const char *wav;
     long frames;
     bool headless;
+    bool profile;
     int msaa; /* -1 = default */
     uint8_t touch_keys[PLAT_TOUCH_KEYS_MAX];
     int touch_key_count;
@@ -160,6 +164,8 @@ static bool parse_args(int argc, char **argv, args *a)
         bool more = i + 1 < argc;
         if (strcmp(argv[i], "--headless") == 0) {
             a->headless = true;
+        } else if (strcmp(argv[i], "--profile") == 0) {
+            a->profile = true;
         } else if (strcmp(argv[i], "--frames") == 0 && more) {
             char *end;
             a->frames = strtol(argv[++i], &end, 10);
@@ -324,7 +330,7 @@ int main(int argc, char **argv)
     if (!parse_args(argc, argv, &a)) {
         fprintf(stderr, "usage: anyswf-player [assets.bin] [--headless] [--frames N] [--screenshot out.png]\n"
                         "       [--msaa N] [--touch-keys k1,k2,...] [--config anyswf.toml]\n"
-                        "       [--input F:BUTTONS[@X/Y],...] [--save-dir DIR] [--wav out.wav]\n");
+                        "       [--input F:BUTTONS[@X/Y],...] [--save-dir DIR] [--wav out.wav] [--profile]\n");
         return 2;
     }
     const plat_config pcfg = {.app_id = ANYSWF_APP_ID,
@@ -344,6 +350,8 @@ int main(int argc, char **argv)
     swf_config cfg;
     load_config(&a, &cfg);
     if (a.screenshot) cfg.cursor_visible = false;
+    swf_prof.overlay = cfg.profiler;
+    swf_prof.log = a.profile;
     swf_assets assets;
 #ifdef __PSP__
     r = swf_assets_load(&assets, PLAT_ROOT_DATA, a.assets ? a.assets : "assets.bin");
@@ -391,16 +399,23 @@ int main(int argc, char **argv)
     uint32_t bg = assets.background;
     uint32_t clear = ((bg & 0xFF) << 16) | (bg & 0xFF00) | ((bg >> 16) & 0xFF);
     long shown = 0;
+    uint32_t prev_held = 0;
     uint64_t start = plat_time_us(), last = start;
     double period_ms = 1000.0 / assets.frame_rate;
     while (plat_frame_begin(clear)) {
         swf_input in;
         current_input(&a, shown + 1, &in);
+        const uint32_t combo = PLAT_BTN_L | PLAT_BTN_R | PLAT_BTN_SELECT;
+        if ((in.held & combo) == combo && !(prev_held & PLAT_BTN_SELECT)) swf_prof.overlay = !swf_prof.overlay;
+        prev_held = in.held;
+        swf_prof_begin(SWF_PROF_SCRIPTS);
         uint64_t now = plat_time_us();
         double dt = a.headless ? period_ms / 1000.0 : (now - last) / 1e6;
         last = now;
         swf_vm_set_time(vm, a.headless ? (uint64_t)(shown * period_ms) : (now - start) / 1000);
         swf_vm_input(vm, &in, dt);
+        swf_prof_end(SWF_PROF_SCRIPTS);
+        swf_prof_begin(SWF_PROF_TIMELINE);
         if (a.headless) {
             /* Headless runs are deterministic: one SWF frame per displayed frame. */
             swf_movie_advance(&movie);
@@ -409,14 +424,21 @@ int main(int argc, char **argv)
         } else {
             swf_movie_update(&movie, dt, 4);
         }
+        swf_prof_end(SWF_PROF_TIMELINE);
+        swf_prof_begin(SWF_PROF_SCRIPTS);
         swf_vm_run_queue(vm);
         /* Timers run after the frame, on the clock at its end (as Ruffle's player does). */
         swf_vm_set_time(vm, a.headless ? (uint64_t)((shown + 1) * period_ms) : (plat_time_us() - start) / 1000);
         swf_vm_run_timers(vm);
         swf_vm_after_frame(vm);
         swf_vm_collect(vm);
+        swf_prof_end(SWF_PROF_SCRIPTS);
+        swf_prof.script_bytes = swf_vm_live_bytes(vm);
+        swf_prof_begin(SWF_PROF_RENDER);
         swf_movie_render(&movie);
         swf_vm_draw_overlay(vm);
+        swf_prof_draw(&assets);
+        swf_prof_end(SWF_PROF_RENDER);
         shown++;
 #ifndef __PSP__
         if (mixer && !live_audio) {
@@ -445,7 +467,10 @@ int main(int argc, char **argv)
             break;
         }
 #endif
+        swf_prof_begin(SWF_PROF_PRESENT);
         plat_frame_end();
+        swf_prof_end(SWF_PROF_PRESENT);
+        swf_prof_frame_done();
         if (a.frames > 0 && shown >= a.frames) break;
     }
     if (live_audio) plat_audio_stop();
