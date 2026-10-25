@@ -9,8 +9,12 @@
 - **TIC-80** (MIT, Copyright (c) 2017 Vadim Grigoruk): the device-text bitmap font
   in `swf2c/src/device_font.rs` is TIC-80's system font (`src/core/font.inl`).
 - **symphonia** 0.5.5 (MPL-2.0): used unmodified as a dependency for MP3 decoding.
-- Other crate dependencies (`lyon`, `jpeg-decoder`, `png`, `gif`, `flate2`) are
+- Other crate dependencies (`lyon`, `jpeg-decoder`, `png`, `gif`, `flate2`, `toml`) are
   MIT OR Apache-2.0.
+- **SDL 3** (zlib license): downloaded by CMake (`cmake/sdl3.cmake`) and linked
+  statically into PC and Android builds. Android APKs from `anyswf build` also contain
+  SDL's Java classes (`org.libsdl.app`, from the same release).
+- `tools/compat-site/generate.py` is adapted from AnyGBA's generator (MIT, same author).
 - **Ruffle test movies** in `tests/ruffle/` (MIT OR Apache-2.0) and the reference
   renders in `tests/render/ref/`, which are produced by Ruffle's exporter; see
   `tests/ruffle/README.md`.

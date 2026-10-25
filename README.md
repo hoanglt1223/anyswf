@@ -1,9 +1,17 @@
 # AnySWF
 
 Ahead-of-time compiler that turns Flash (AS1/AS2) SWF movies into native PSP
-homebrew (`EBOOT.PBP`) plus a PC debug build. ActionScript bytecode is compiled
-to C and vector art is tessellated at build time, so the PSP only runs native
-code and draws triangles.
+homebrew (`EBOOT.PBP`), and into native Windows, Linux, macOS and Android games.
+ActionScript bytecode is compiled to C and vector art is tessellated at build time,
+so the PSP only runs native code and draws triangles.
+
+```sh
+anyswf build game.swf --target psp|linux|windows|macos|android -o out/game
+```
+
+See [docs/user/EXPORT.md](docs/user/EXPORT.md). Compatibility: `compat/*.toml`, rendered
+by `tools/compat-site/generate.py`; how to test a game and report it:
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 Status: early. The platform layer, the asset pipeline (`swf2c assets`), the PC
 renderer (display list, timeline, colour transforms, masks, add/multiply/screen
@@ -16,12 +24,14 @@ Ruffle's MIT/Apache test movies in `tests/ruffle/` and `tests/ruffle-avm1/`.
 
 | Path | Contents |
 |---|---|
-| `swf2c/` | Rust workspace for the SWF-to-C compiler and asset converter |
+| `swf2c/` | Rust workspace for the SWF-to-C compiler and asset converter (`swf2c`) and the `anyswf build` front end (`src/anyswf/`) |
 | `runtime/` | C11 runtime (libswfrt): assets.bin loader, display list, timeline, renderer |
 | `apps/player/` | `anyswf-player`: plays an assets.bin; headless PNG screenshots for tests |
 | `docs/dev/assets-bin-format.md` | The assets.bin file format |
 | `platform/platform.h` | Small platform API: frame pacing, input, audio, files, clock |
-| `platform/psp/`, `platform/sdl/` | PSP (pspsdk/GU) and PC (SDL3/OpenGL) backends |
+| `platform/psp/`, `platform/sdl/` | PSP (pspsdk/GU) and PC (SDL3/OpenGL 2.1, OpenGL ES 1.1 on Android) backends |
+| `platform/android/` | APK template (manifest, `GameActivity`, resources) for `anyswf build --target android` |
+| `compat/`, `tools/compat-site/` | Compatibility records and the page generator |
 | `apps/hello/` | Hello triangle + tone, the smoke test for both backends |
 | `tests/platform/` | Platform unit tests (PC) |
 | `tests/swf-src/` | Self-authored AS2 tests (`*.as`) with expected trace output |
@@ -30,6 +40,7 @@ Ruffle's MIT/Apache test movies in `tests/ruffle/` and `tests/ruffle-avm1/`.
 | `tests/ruffle/` | Render test SWFs copied from Ruffle (MIT/Apache-2.0) |
 | `tests/ruffle-avm1/` | AVM1 test SWFs and Flash Player traces copied from Ruffle (MIT/Apache-2.0) |
 | `tests/avm1/` | AVM1 conformance runner (compile, build, run headless, diff traces) |
+| `tests/psp/` | The AS2 corpus as EBOOTs under PPSSPPHeadless (trace diff) |
 | `cmake/psp.cmake` | PSP toolchain file (wraps pspdev's) |
 | `docker/psp-build.Dockerfile` | Pinned `pspdev/pspdev` build image |
 
@@ -70,6 +81,7 @@ Compiler and asset converter:
 cd swf2c && cargo build --release && cargo test
 swf2c inspect game.swf                      # header and character table
 swf2c assets game.swf -o assets.bin         # meshes, textures, sounds, timelines
+             [--target psp|pc|android]      # screen and detail settings (default psp)
 anyswf-player assets.bin                    # PC playback (windowed)
 anyswf-player assets.bin --screenshot f.png # headless, frame 1 as PNG
 ```
@@ -96,14 +108,24 @@ python tests/avm1/run-avm1-tests.py --swf2c <swf2c> --out out/avm1 --corpus out/
     [--generator "Visual Studio 17 2022"] [--only ruffle_<name> ...]
 ```
 
+AS2 corpus on the PSP target (PPSSPPHeadless Docker image `ppsspp-headless:local`):
+
+```sh
+python tests/psp/run-psp-corpus.py --anyswf <anyswf>
+```
+
 Releases: pushing a `v*` tag runs `.github/workflows/release.yml`, which publishes
-swf2c and anyswf-player for Windows, Linux and macOS plus the PSP EBOOTs.
+swf2c, anyswf (with the source tree it builds games from) and anyswf-player for
+Windows, Linux and macOS plus the PSP EBOOTs. `.github/workflows/pages.yml` checks
+`compat/` and publishes the compatibility page once Pages is enabled and the
+repository variable `PAGES_ENABLED` is `true`.
 
 ## Controls on PC
 
 Arrows = D-pad, Z/X/A/S = Cross/Circle/Square/Triangle, Q/W = L/R,
 Enter = Start, Right Shift = Select, IJKL = analog nub, Esc = quit.
-Gamepads map by position (south button = Cross).
+Gamepads map by position (south button = Cross). The platform also reports the
+mouse (or touch) and every key as Flash key codes; exported games use those.
 
 ## License
 
