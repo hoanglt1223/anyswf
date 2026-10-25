@@ -357,10 +357,11 @@ void obj_set(swf_ctx *cx, swf_obj *o, swf_str *key, swf_val v)
         }
         if (p->attr & ATTR_READ_ONLY) return;
         p->val = v;
-        return;
+    } else {
+        swf_prop *p = insert(vm, o, key);
+        p->val = v;
     }
-    swf_prop *p = insert(vm, o, key);
-    p->val = v;
+    if (o->cls == OC_CLIP && o->u.clip && o->u.clip->has_bound_text) textfield_var_changed(cx, o->u.clip, key, v);
 }
 
 swf_val obj_call_method(swf_ctx *cx, swf_obj *o, swf_str *name, uint32_t argc, const swf_val *argv, bool special)

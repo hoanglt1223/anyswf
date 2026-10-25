@@ -257,6 +257,14 @@ static swf_sound_state *state_of(swf_val this_)
     return this_.t == SWF_T_OBJ && this_.u.o->cls == OC_SOUND ? &this_.u.o->u.sound : NULL;
 }
 
+/* A Sound made for a clip that does not exist (any more) has no transform to report. */
+static swf_sound_state *live_state(swf_val this_)
+{
+    swf_sound_state *s = state_of(this_);
+    if (s && s->has_target && (!s->target || !s->target->u.clip || s->target->u.clip->removed)) return NULL;
+    return s;
+}
+
 static swf_val sound_ctor(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv)
 {
     swf_obj *o = to_object(cx, this_);
@@ -265,6 +273,7 @@ static swf_val sound_ctor(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_v
     memset(&o->u.sound, 0, sizeof o->u.sound);
     o->u.sound.sound = SWF_NONE;
     if (argc && !is_nullish(argv[0])) {
+        o->u.sound.has_target = true;
         swf_dobj *base = ctx_base(cx) ? ctx_base(cx) : clip_root(cx->vm);
         swf_dobj *d = resolve_target_clip(cx, base, argv[0], false);
         if (d) o->u.sound.target = clip_object(cx->vm, d);
@@ -363,7 +372,7 @@ static swf_val snd_set_volume(swf_ctx *cx, swf_val this_, uint32_t argc, const s
 static swf_val snd_get_volume(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv)
 {
     (void)argc; (void)argv;
-    swf_sound_state *s = state_of(this_);
+    swf_sound_state *s = live_state(this_);
     if (!s) return swf_undef();
     double vol, pan;
     transform_of(cx->vm, s->target, &vol, &pan);
@@ -383,11 +392,39 @@ static swf_val snd_set_pan(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_
 static swf_val snd_get_pan(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv)
 {
     (void)argc; (void)argv;
-    swf_sound_state *s = state_of(this_);
+    swf_sound_state *s = live_state(this_);
     if (!s) return swf_undef();
     double vol, pan;
     transform_of(cx->vm, s->target, &vol, &pan);
     return swf_num(pan);
+}
+
+/* Channel mix as Flash reports it: ll/rr from the pan, no cross-mixing. */
+static swf_val snd_get_transform(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv)
+{
+    (void)argc; (void)argv;
+    swf_sound_state *s = live_state(this_);
+    if (!s) return swf_undef();
+    double vol, pan;
+    transform_of(cx->vm, s->target, &vol, &pan);
+    swf_obj *o = obj_new(cx->vm, cx->vm->object_proto);
+    obj_set(cx, o, atom_ascii(cx->vm, "ll"), swf_num(pan > 0 ? 100 - pan : 100));
+    obj_set(cx, o, atom_ascii(cx->vm, "lr"), swf_num(0));
+    obj_set(cx, o, atom_ascii(cx->vm, "rr"), swf_num(pan < 0 ? 100 + pan : 100));
+    obj_set(cx, o, atom_ascii(cx->vm, "rl"), swf_num(0));
+    return swf_objv(o);
+}
+
+static swf_val snd_set_transform(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv)
+{
+    swf_sound_state *s = live_state(this_);
+    if (!s || argc < 1 || argv[0].t != SWF_T_OBJ) return swf_undef();
+    double ll = to_number(cx, obj_get(cx, argv[0].u.o, atom_ascii(cx->vm, "ll")));
+    double rr = to_number(cx, obj_get(cx, argv[0].u.o, atom_ascii(cx->vm, "rr")));
+    if (isnan(ll)) ll = 100;
+    if (isnan(rr)) rr = 100;
+    set_transform_value(cx->vm, s, false, ll >= rr ? -(100 - rr) : 100 - ll);
+    return swf_undef();
 }
 
 static swf_val snd_duration(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv)
@@ -396,7 +433,7 @@ static swf_val snd_duration(swf_ctx *cx, swf_val this_, uint32_t argc, const swf
     swf_sound_state *s = state_of(this_);
     if (!s || s->sound == SWF_NONE) return swf_undef();
     const swf_sound *snd = &cx->vm->movie->assets->sounds[s->sound];
-    return swf_num(snd->rate ? floor((double)snd->frames * 1000.0 / snd->rate) : 0);
+    return swf_num(snd->rate ? round((double)snd->frames * 1000.0 / snd->rate) : 0);
 }
 
 static swf_val snd_position(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv)
@@ -441,6 +478,10 @@ void builtins_sound(swf_vm *vm)
     native_method(vm, p, "getVolume", snd_get_volume, A);
     native_method(vm, p, "setPan", snd_set_pan, A);
     native_method(vm, p, "getPan", snd_get_pan, A);
+    native_method(vm, p, "getTransform", snd_get_transform, A);
+    native_method(vm, p, "getDuration", snd_duration, A);
+    native_method(vm, p, "getPosition", snd_position, A);
+    native_method(vm, p, "setTransform", snd_set_transform, A);
     native_method(vm, p, "getBytesLoaded", snd_bytes, A | ATTR_VERSION_6);
     native_method(vm, p, "getBytesTotal", snd_bytes, A | ATTR_VERSION_6);
     native_method(vm, p, "loadSound", snd_load, A | ATTR_VERSION_6);

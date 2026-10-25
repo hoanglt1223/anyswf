@@ -136,6 +136,29 @@ static void bind_task(swf_ctx *cx, void *user)
     d->var_bound = true;
 }
 
+void textfield_placed(swf_vm *vm, swf_dobj *d)
+{
+    if (!swf_dobj_edit(vm->movie, d)->var_name[0] || !d->parent) return;
+    d->parent->has_bound_text = true;
+    bind_req r = {d};
+    vm_run_protected(vm, d->parent, bind_task, &r);
+}
+
+void textfield_var_changed(swf_ctx *cx, swf_dobj *d, swf_str *key, swf_val v)
+{
+    swf_vm *vm = cx->vm;
+    for (swf_dobj *c = d->children; c; c = c->next) {
+        if (c->kind != SWF_CHAR_EDIT_TEXT || c->removed) continue;
+        const char *vn = swf_dobj_edit(vm->movie, c)->var_name;
+        if (!vn[0]) continue;
+        swf_str *name = str_from_utf8(vm, vn, strlen(vn));
+        if (vm->case_sensitive ? str_eq(name, key) : str_eq_nocase(name, key)) {
+            set_text_value(cx, c, v, false);
+            c->var_bound = true;
+        }
+    }
+}
+
 static void sync_tree(swf_vm *vm, swf_dobj *d)
 {
     for (swf_dobj *c = d->children; c; c = c->next) {
@@ -179,7 +202,7 @@ swf_dobj *textfield_create(swf_ctx *cx, swf_dobj *parent, swf_val name, int32_t 
     e->bounds[3] = (int32_t)(h * 20);
     e->height = 240; /* 12 pt Times in Flash; the device font here */
     e->flags = ET_READ_ONLY;
-    e->color = 0xFF000000u;
+    e->color = e->new_color = 0xFF000000u;
     e->var_name = vn;
     e->initial_text = it;
     e->background_color = 0xFFFFFFFFu;
@@ -260,13 +283,14 @@ FLAG_PROP(tf_get_multiline, tf_set_multiline, ET_MULTILINE, false)
 FLAG_PROP(tf_get_embed_fonts, tf_set_embed_fonts, ET_USE_OUTLINES, false)
 FLAG_PROP(tf_get_selectable, tf_set_selectable, ET_NO_SELECT, true)
 
-TF_GET(tf_get_text_color) { TF_PRELUDE; return swf_num(rgb_of(swf_dobj_edit(vm->movie, d)->color)); }
+TF_GET(tf_get_text_color) { TF_PRELUDE; return swf_num(rgb_of(swf_dobj_edit(vm->movie, d)->new_color)); }
 TF_GET(tf_set_text_color)
 {
     TF_PRELUDE;
     if (argc) {
         swf_edit_text *e = edit_mut(vm, d);
         e->color = rgba_from(to_uint32(cx, argv[0]), e->color);
+        e->new_color = e->color;
     }
     return swf_undef();
 }
@@ -334,10 +358,10 @@ TF_GET(tf_set_type)
     if (!argc) return swf_undef();
     swf_str *s = to_string(cx, argv[0]);
     swf_edit_text *e = edit_mut(vm, d);
-    if (str_eq_ascii(s, "input")) {
+    if (str_eq_nocase(s, atom_ascii(vm, "input"))) {
         e->flags = (uint16_t)(e->flags & ~ET_READ_ONLY);
         vm_warn(vm, WARN_TEXT_INPUT, "avm1: input text fields are shown but cannot be edited yet");
-    } else if (str_eq_ascii(s, "dynamic")) {
+    } else if (str_eq_nocase(s, atom_ascii(vm, "dynamic"))) {
         e->flags = (uint16_t)(e->flags | ET_READ_ONLY);
     }
     return swf_undef();
@@ -358,6 +382,7 @@ TF_GET(tf_set_variable)
     free((char *)e->var_name);
     e->var_name = u;
     d->var_bound = false;
+    if (d->parent && u[0]) d->parent->has_bound_text = true;
     return swf_undef();
 }
 TF_GET(tf_get_max_chars)
@@ -400,7 +425,7 @@ static void format_set(swf_ctx *cx, swf_obj *f, const char *k, swf_val v)
     obj_set(cx, f, atom_ascii(cx->vm, k), v);
 }
 
-static swf_val tf_get_text_format(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv)
+static swf_val text_format(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv, bool new_text)
 {
     TF_PRELUDE;
     const swf_edit_text *e = swf_dobj_edit(vm->movie, d);
@@ -409,7 +434,7 @@ static swf_val tf_get_text_format(swf_ctx *cx, swf_val this_, uint32_t argc, con
     const char *font = fch && fch->kind == SWF_CHAR_FONT ? vm->movie->assets->fonts[fch->index].name : "_sans";
     format_set(cx, f, "font", swf_strv(str_from_utf8(vm, font, strlen(font))));
     format_set(cx, f, "size", swf_num(e->height / 20.0));
-    format_set(cx, f, "color", swf_num(rgb_of(e->color)));
+    format_set(cx, f, "color", swf_num(rgb_of(new_text ? e->new_color : e->color)));
     static const char *const ALIGN[] = {"left", "right", "center", "justify"};
     format_set(cx, f, "align", swf_strv(atom_ascii(vm, ALIGN[e->align < 4 ? e->align : 0])));
     format_set(cx, f, "leftMargin", swf_num(e->left_margin / 20.0));
@@ -422,8 +447,19 @@ static swf_val tf_get_text_format(swf_ctx *cx, swf_val this_, uint32_t argc, con
     return swf_objv(f);
 }
 
-/* Applies a TextFormat to the whole field (runs of formatting are not kept). */
-static swf_val tf_set_text_format(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv)
+static swf_val tf_get_text_format(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv)
+{
+    return text_format(cx, this_, argc, argv, false);
+}
+
+static swf_val tf_get_new_text_format(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv)
+{
+    return text_format(cx, this_, argc, argv, true);
+}
+
+/* Applies a TextFormat to the whole field (runs of formatting are not kept). The text
+ * colour also sets the new-text colour (textColor) only through setNewTextFormat. */
+static swf_val apply_text_format(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv, bool new_text)
 {
     TF_PRELUDE;
     if (argc < 1) return swf_undef();
@@ -432,7 +468,11 @@ static swf_val tf_set_text_format(swf_ctx *cx, swf_val this_, uint32_t argc, con
     swf_obj *f = fv.u.o;
     swf_edit_text *e = edit_mut(vm, d);
     swf_val v = obj_get(cx, f, atom_ascii(vm, "color"));
-    if (!is_nullish(v)) e->color = rgba_from(to_uint32(cx, v), e->color);
+    if (!is_nullish(v)) {
+        uint32_t c = rgba_from(to_uint32(cx, v), e->color);
+        if (new_text) e->new_color = c;
+        else e->color = c;
+    }
     v = obj_get(cx, f, atom_ascii(vm, "size"));
     if (!is_nullish(v)) {
         double s = to_number(cx, v);
@@ -476,6 +516,16 @@ static swf_val tf_set_text_format(swf_ctx *cx, swf_val this_, uint32_t argc, con
     }
     apply_auto_size(vm, d);
     return swf_undef();
+}
+
+static swf_val tf_set_text_format(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv)
+{
+    return apply_text_format(cx, this_, argc, argv, false);
+}
+
+static swf_val tf_set_new_text_format(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv)
+{
+    return apply_text_format(cx, this_, argc, argv, true);
 }
 
 static swf_val tf_remove(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv)
@@ -543,8 +593,8 @@ void builtins_textfield(swf_vm *vm)
     const uint16_t M = DD | ATTR_VERSION_6;
     native_method(vm, p, "getTextFormat", tf_get_text_format, M);
     native_method(vm, p, "setTextFormat", tf_set_text_format, M);
-    native_method(vm, p, "getNewTextFormat", tf_get_text_format, M);
-    native_method(vm, p, "setNewTextFormat", tf_set_text_format, M);
+    native_method(vm, p, "getNewTextFormat", tf_get_new_text_format, M);
+    native_method(vm, p, "setNewTextFormat", tf_set_new_text_format, M);
     native_method(vm, p, "removeTextField", tf_remove, M);
     native_method(vm, p, "getDepth", tf_get_depth, M | ATTR_READ_ONLY);
     native_method(vm, p, "replaceSel", tf_replace_sel, M);
@@ -569,6 +619,7 @@ void builtins_textfield(swf_vm *vm)
     prop(vm, p, "textHeight", tf_get_text_height, NULL, 0);
     prop(vm, p, "scroll", tf_get_scroll, tf_ignore_set, 0);
     prop(vm, p, "maxscroll", tf_get_scroll, NULL, 0);
+    obj_define_ascii(vm, p, "mouseWheelEnabled", swf_bool(true), 0);
     obj_set_attributes(vm, p, NULL, DD, 0);
 
     swf_obj *fp = obj_new(vm, vm->object_proto);

@@ -401,7 +401,6 @@ int main(int argc, char **argv)
         last = now;
         swf_vm_set_time(vm, a.headless ? (uint64_t)(shown * period_ms) : (now - start) / 1000);
         swf_vm_input(vm, &in, dt);
-        swf_vm_run_timers(vm);
         if (a.headless) {
             /* Headless runs are deterministic: one SWF frame per displayed frame. */
             swf_movie_advance(&movie);
@@ -411,6 +410,9 @@ int main(int argc, char **argv)
             swf_movie_update(&movie, dt, 4);
         }
         swf_vm_run_queue(vm);
+        /* Timers run after the frame, on the clock at its end (as Ruffle's player does). */
+        swf_vm_set_time(vm, a.headless ? (uint64_t)((shown + 1) * period_ms) : (plat_time_us() - start) / 1000);
+        swf_vm_run_timers(vm);
         swf_vm_after_frame(vm);
         swf_vm_collect(vm);
         swf_movie_render(&movie);

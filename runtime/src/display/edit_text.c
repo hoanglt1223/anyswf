@@ -218,6 +218,6 @@ const swf_edit_text *swf_dobj_edit(const swf_movie *m, const swf_dobj *o)
 {
     if (o->edit) return o->edit;
     static const swf_edit_text EMPTY = {{0, 0, 0, 0}, 0, 240, 0xFF000000u, 0, 0, 0, 0, 0, 0, 0, "", "",
-                                        false, false, 0xFFFFFFFFu, 0xFF000000u, 0};
+                                        false, false, 0xFFFFFFFFu, 0xFF000000u, 0, 0xFF000000u};
     return o->index < m->assets->edit_count ? &m->assets->edits[o->index] : &EMPTY;
 }

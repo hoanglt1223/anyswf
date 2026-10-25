@@ -160,6 +160,7 @@ typedef struct swf_edit_text {
     bool background, border;
     uint32_t background_color, border_color; /* RGBA bytes, R lowest */
     uint8_t auto_size;                       /* 0 none, 1 left, 2 center, 3 right */
+    uint32_t new_color;                      /* TextField.textColor / new-text format colour */
 } swf_edit_text;
 
 typedef struct swf_glyph {

@@ -37,7 +37,9 @@ void vm_queue_script(swf_vm *vm, swf_dobj *clip, uint32_t script, bool unload)
     q.kind = QK_SCRIPT;
     q.unload = unload;
     q.script = script;
-    vm_queue(vm, Q_NORMAL, &q);
+    /* Unload handlers run before frame scripts already queued (the removal happened
+     * while the frame was built). */
+    vm_queue(vm, unload ? Q_CONSTRUCT : Q_NORMAL, &q);
 }
 
 void vm_queue_method(swf_vm *vm, swf_dobj *clip, swf_obj *obj, swf_str *name, uint32_t nargs, const swf_val *args,
@@ -51,7 +53,7 @@ void vm_queue_method(swf_vm *vm, swf_dobj *clip, swf_obj *obj, swf_str *name, ui
     q.obj = obj;
     q.nargs = (uint8_t)(nargs > 2 ? 2 : nargs);
     for (uint8_t i = 0; i < q.nargs; i++) q.args[i] = args[i];
-    vm_queue(vm, Q_NORMAL, &q);
+    vm_queue(vm, unload ? Q_CONSTRUCT : Q_NORMAL, &q);
 }
 
 void vm_queue_broadcast(swf_vm *vm, swf_obj *obj, const char *name, uint32_t nargs, const swf_val *args)
@@ -161,7 +163,10 @@ void vm_display_event(swf_movie *m, swf_dobj *clip, int event, void *user)
     swf_vm *vm = user;
     (void)m;
     switch (event) {
-    case SWF_EV_PLACED: placed(vm, clip); break;
+    case SWF_EV_PLACED:
+        if (clip->kind == SWF_CHAR_EDIT_TEXT) textfield_placed(vm, clip);
+        else placed(vm, clip);
+        break;
     case SWF_EV_ENTER_FRAME: vm_clip_event(vm, clip, CE_ENTER_FRAME, "onEnterFrame", 0); break;
     case SWF_EV_REMOVED:
         if (clip->script_object) {

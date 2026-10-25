@@ -60,12 +60,12 @@ static void mark_removed(swf_dobj *o)
     for (swf_dobj *c = o->children; c; c = c->next) mark_removed(c);
 }
 
-/* Parents report removal before their children, as Flash runs unload handlers. */
+/* Children report removal before their parent, as Flash runs unload handlers. */
 static void report_removed(swf_movie *m, swf_dobj *o)
 {
     if (o->removed) return;
-    if (o->kind == SWF_CHAR_SPRITE) m->on_event(m, o, SWF_EV_REMOVED, m->user);
     for (swf_dobj *c = o->children; c; c = c->next) report_removed(m, c);
+    if (o->kind == SWF_CHAR_SPRITE) m->on_event(m, o, SWF_EV_REMOVED, m->user);
 }
 
 static void free_now(swf_dobj *o)
@@ -145,6 +145,13 @@ swf_dobj *swf_clip_child_named(swf_dobj *clip, const char *name, bool case_sensi
 /* Inserts `o` into the depth-sorted child list, replacing any object at that depth. */
 void swf_clip_insert(swf_movie *m, swf_dobj *clip, swf_dobj *o)
 {
+    /* Flash names every unnamed clip, button and text field "instanceN" in creation order. */
+    if ((!o->name || !o->name[0]) &&
+        (o->kind == SWF_CHAR_SPRITE || o->kind == SWF_CHAR_BUTTON || o->kind == SWF_CHAR_EDIT_TEXT)) {
+        char buf[24];
+        snprintf(buf, sizeof buf, "instance%u", (unsigned)++m->instance_counter);
+        if (!swf_dobj_set_name(o, buf)) plat_log("display: out of memory naming an instance");
+    }
     swf_dobj **pp = &clip->children;
     while (*pp && (*pp)->depth < o->depth) pp = &(*pp)->next;
     if (*pp && (*pp)->depth == o->depth) {
@@ -156,6 +163,7 @@ void swf_clip_insert(swf_movie *m, swf_dobj *clip, swf_dobj *o)
     }
     *pp = o;
     o->parent = clip;
+    if (o->kind == SWF_CHAR_EDIT_TEXT && m->on_event) m->on_event(m, o, SWF_EV_PLACED, m->user);
 }
 
 void swf_clip_remove_child(swf_movie *m, swf_dobj *clip, int32_t depth)

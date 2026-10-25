@@ -8,7 +8,7 @@
 
 #include <math.h>
 
-#define AVM_MAX_DEPTH 2130690045
+#define AVM_MAX_DEPTH 2130706428
 #define AVM_MAX_REMOVE_DEPTH 2130706416
 #define INVALID_BOUNDS 6710886.4
 
@@ -178,9 +178,10 @@ static swf_val mc_duplicate(swf_ctx *cx, swf_val this_, uint32_t argc, const swf
 {
     swf_dobj *d = this_display(this_);
     if (!d || argc < 1) return swf_undef();
+    swf_val name = swf_strv(to_string(cx, argv[0])); /* coerced before the depth, as in Flash */
     int64_t depth = (int64_t)to_int32(cx, arg(argc, argv, 1)) + AVM_DEPTH_BIAS;
     swf_val init = argc > 2 ? swf_objv(to_object_or_bare(cx, argv[2])) : swf_undef();
-    swf_dobj *o = clone(cx, d, argv[0], depth, init);
+    swf_dobj *o = clone(cx, d, name, depth, init);
     if (cx->version < 6 || !o) return swf_undef();
     return swf_objv(clip_object(cx->vm, o));
 }

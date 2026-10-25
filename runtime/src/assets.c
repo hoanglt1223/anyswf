@@ -436,6 +436,7 @@ static bool parse_misc(swf_assets *a, ctx *c)
         e->background_color = 0xFFFFFFFFu;
         e->border_color = 0xFF000000u;
         e->auto_size = (e->flags & (1u << 14)) ? 1 : 0; /* SWF 8 AutoSize flag: left aligned */
+        e->new_color = e->color;
     }
 
     if (!table(c, "GLYF", 12, &b)) return false;

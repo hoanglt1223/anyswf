@@ -80,6 +80,7 @@ struct swf_dobj {
      * was changed by script. NULL uses the asset's record. */
     swf_edit_text *edit;
     bool var_bound;       /* the text field's variable was initialised from its text */
+    bool has_bound_text;  /* sprites: a child text field is bound to one of its variables */
 
     /* Sprites: vector content drawn by script, below the children (owned). */
     swf_drawing *drawing;
@@ -92,7 +93,8 @@ struct swf_dobj {
 
 /* Display events reported to the script VM. */
 enum swf_display_event {
-    SWF_EV_PLACED = 1,      /* a sprite was created; its first frame is about to be built */
+    SWF_EV_PLACED = 1,      /* a sprite was created (its first frame is about to be built), or a
+                             * text field was placed */
     SWF_EV_ENTER_FRAME = 2, /* a sprite starts a new SWF frame (before its timeline steps) */
     SWF_EV_REMOVED = 3      /* a sprite left the display list (once per sprite, children too) */
 };
@@ -125,6 +127,7 @@ typedef struct swf_movie {
      * so queued unload handlers can still run on them. */
     bool hold_removed;
     uint8_t scale_mode;   /* swf_scale_mode */
+    uint32_t instance_counter; /* default names "instanceN" for unnamed objects */
 } swf_movie;
 
 /* Called when a display object with a script object is destroyed (set by the VM). */

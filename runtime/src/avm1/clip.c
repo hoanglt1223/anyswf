@@ -191,8 +191,9 @@ swf_val clip_get_property_index(swf_ctx *cx, swf_dobj *d, int index)
 {
     swf_vm *vm = cx->vm;
     switch (index) {
-    case P_X: return swf_num(d->matrix.tx / 20.0);
-    case P_Y: return swf_num(d->matrix.ty / 20.0);
+    /* Flash positions are whole twips. */
+    case P_X: return swf_num(round(d->matrix.tx) / 20.0);
+    case P_Y: return swf_num(round(d->matrix.ty) / 20.0);
     case P_XSCALE: return swf_num(mscale_x(&d->matrix) * 100.0);
     case P_YSCALE: return swf_num(mscale_y(&d->matrix) * 100.0);
     case P_CURRENTFRAME: return swf_num(d->kind == SWF_CHAR_SPRITE ? (d->frame ? d->frame : 1) : 1);
@@ -446,7 +447,7 @@ static swf_val mc_get_depth(swf_ctx *cx, swf_val this_, uint32_t argc, const swf
 {
     (void)cx; (void)argc; (void)argv;
     swf_dobj *d = clip_of(this_);
-    return d ? swf_num(d->parent ? d->depth - 16384 : 0) : swf_undef();
+    return d ? swf_num(d->depth - 16384) : swf_undef();
 }
 
 static swf_val mc_bytes(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv)

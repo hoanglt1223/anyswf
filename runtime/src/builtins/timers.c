@@ -5,7 +5,7 @@
 #include "../avm1/vm_internal.h"
 
 #define MIN_INTERVAL_MS 10
-#define MAX_TICKS 100
+#define MAX_TICKS 10
 
 void swf_vm_set_time(swf_vm *vm, uint64_t ms)
 {

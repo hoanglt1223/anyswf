@@ -46,6 +46,7 @@ typedef swf_val (*swf_native_fn)(swf_ctx *cx, swf_val this_, uint32_t argc, cons
 /* Native state of a Sound object (builtins/sound.c). */
 typedef struct swf_sound_state {
     swf_obj *target;     /* clip object the sound is bound to; NULL = global */
+    bool has_target;     /* made with a target: getters are undefined while it is gone */
     uint32_t sound;      /* attached sound index or SWF_NONE */
     uint32_t voice;      /* last voice started by this object, 0 = none */
     uint32_t start_ms;   /* duration bookkeeping */
@@ -204,7 +205,8 @@ struct swf_vm {
     swf_obj *shared_objects;   /* SharedObject.getLocal cache: name -> object */
     swf_obj *voices;           /* voice id -> Sound object (onSoundComplete) */
     swf_mixer *mixer;
-    int16_t snd_volume, snd_pan;   /* global Sound transform (new Sound() without target) */
+    int16_t snd_volume, snd_pan;
+    uint8_t stage_align;           /* Stage.align flags: 1 L, 2 T, 4 R, 8 B */   /* global Sound transform (new Sound() without target) */
     struct {
         swf_obj *clip;             /* timeline whose stream sound plays */
         uint32_t voice, tick;      /* tick of the last stream block seen */
@@ -375,6 +377,9 @@ void builtins_button(swf_vm *vm);
 void builtins_timers(swf_vm *vm);
 void builtins_textfield(swf_vm *vm);
 void textfield_sync_variables(swf_vm *vm);
+void textfield_placed(swf_vm *vm, swf_dobj *d);
+/* A variable of clip `d` changed: refresh its bound text fields. */
+void textfield_var_changed(swf_ctx *cx, swf_dobj *d, swf_str *key, swf_val v);
 void builtins_date(swf_vm *vm);
 void builtins_sound(swf_vm *vm);
 void sound_after_frame(swf_vm *vm);

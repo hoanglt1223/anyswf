@@ -39,20 +39,50 @@ static swf_val stage_set_scale(swf_ctx *cx, swf_val this_, uint32_t argc, const 
     (void)this_;
     if (argc < 1) return swf_undef();
     swf_str *s = to_string(cx, argv[0]);
-    for (uint8_t i = 0; i < 4; i++) {
-        swf_str *n = atom_ascii(cx->vm, SCALE_NAMES[i]);
-        if (str_eq_nocase(s, n)) {
-            cx->vm->movie->scale_mode = i;
-            break;
-        }
-    }
+    uint8_t mode = SWF_SCALE_SHOW_ALL; /* unknown names select the default */
+    for (uint8_t i = 0; i < 4; i++)
+        if (str_eq_nocase(s, atom_ascii(cx->vm, SCALE_NAMES[i]))) mode = i;
+    cx->vm->movie->scale_mode = mode;
     return swf_undef();
 }
 
 static swf_val stage_get_align(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv)
 {
     (void)this_; (void)argc; (void)argv;
-    return swf_strv(cx->vm->s.empty);
+    char s[5];
+    int n = 0;
+    uint8_t a = cx->vm->stage_align;
+    /* AVM1 order; "LTRB" is possible and acts as top-left. */
+    if (a & 1) s[n++] = 'L';
+    if (a & 2) s[n++] = 'T';
+    if (a & 4) s[n++] = 'R';
+    if (a & 8) s[n++] = 'B';
+    s[n] = 0;
+    return swf_strv(atom_ascii(cx->vm, s));
+}
+
+static swf_val stage_set_align(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv)
+{
+    (void)this_;
+    swf_str *s = to_string(cx, arg(argc, argv, 0));
+    uint8_t a = 0;
+    for (uint32_t i = 0; i < s->len; i++) {
+        switch (s->ch[i] | 0x20) {
+        case 'l': a |= 1; break;
+        case 't': a |= 2; break;
+        case 'r': a |= 4; break;
+        case 'b': a |= 8; break;
+        default: break;
+        }
+    }
+    cx->vm->stage_align = a;
+    return swf_undef();
+}
+
+static swf_val stage_display_state(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv)
+{
+    (void)this_; (void)argc; (void)argv;
+    return swf_strv(atom_ascii(cx->vm, "normal"));
 }
 
 static swf_val stage_true(swf_ctx *cx, swf_val this_, uint32_t argc, const swf_val *argv)
@@ -139,11 +169,12 @@ static swf_val color_set_transform(swf_ctx *cx, swf_val this_, uint32_t argc, co
     if (!d || argc < 1 || argv[0].t != SWF_T_OBJ) return swf_undef();
     swf_obj *t = argv[0].u.o;
     for (int i = 0; i < 4; i++) {
-        swf_val m = obj_get(cx, t, atom_ascii(cx->vm, CT_MUL[i]));
-        swf_val a = obj_get(cx, t, atom_ascii(cx->vm, CT_ADD[i]));
-        /* Flash keeps the multiplier in 8.8 fixed point and the offset as an integer. */
-        if (m.t != SWF_T_UNDEF) d->cxform.mul[i] = (float)((int16_t)f64_to_i32(to_number(cx, m) * 2.56)) / 256.0f;
-        if (a.t != SWF_T_UNDEF) d->cxform.add[i] = (float)(int16_t)f64_to_i32(to_number(cx, a));
+        /* Only own properties count. Flash keeps the multiplier in 8.8 fixed point and the
+         * offset as a 16-bit integer. */
+        swf_str *km = atom_ascii(cx->vm, CT_MUL[i]), *ka = atom_ascii(cx->vm, CT_ADD[i]);
+        if (obj_has_own(cx, t, km))
+            d->cxform.mul[i] = (float)((int16_t)f64_to_i32(to_number(cx, obj_get(cx, t, km)) * 256.0 / 100.0)) / 256.0f;
+        if (obj_has_own(cx, t, ka)) d->cxform.add[i] = (float)(int16_t)f64_to_i32(to_number(cx, obj_get(cx, t, ka)));
     }
     return swf_undef();
 }
@@ -156,7 +187,8 @@ void builtins_stage(swf_vm *vm)
     prop(vm, s, "width", stage_width, NULL);
     prop(vm, s, "height", stage_height, NULL);
     prop(vm, s, "scaleMode", stage_get_scale, stage_set_scale);
-    prop(vm, s, "align", stage_get_align, stage_ignore);
+    prop(vm, s, "align", stage_get_align, stage_set_align);
+    prop(vm, s, "displayState", stage_display_state, stage_ignore);
     prop(vm, s, "showMenu", stage_true, stage_ignore);
     broadcaster_init(vm, s);
 
